@@ -140,14 +140,18 @@ void PoseRefiner::refineMarkerPose(EDInterface* edInterface, Marker& marker)
 	cv::Ptr<cv::MinProblemSolver::Function> ptr_F = cv::makePtr<Refine>();
 	solver->setFunction(ptr_F);
 	cv::Mat x(1, 9, CV_64FC1);
+
 	for (int i = 0; i < 3; i++)
 		for (int j = 0; j < 3; j++)
 			x.at<double>(i + j * 3) = marker.H.at<double>(i, j);
 	cv::Mat step(9, 1, CV_64FC1);
+
 	for (int i = 0; i < 3; i++)
 		for (int j = 0; j < 3; j++)
 			step.at<double>(i + j * 3) = abs(0.001 * x.at<double>(i + j * 3));
+
 	solver->setInitStep(step);
+
 	double res = solver->minimize(x);
 
 	for (int i = 0; i < 3; i++)

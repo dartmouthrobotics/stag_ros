@@ -124,11 +124,11 @@ void Drawer::drawMarkers(const string& path, Mat image, const vector<Marker> &ma
 
 		cv::circle(bgrMat, cv::Point(corners[0].x, corners[0].y), 6, cv::Scalar(255, 255, 255), -1, CV_AA);
 		for (int j = 0; j < 4; j++)
-			cv::line(bgrMat, cv::Point(corners[j].x, corners[j].y), cv::Point(corners[(j + 1) % 4].x, corners[(j + 1) % 4].y), cv::Scalar(255, 255, 255), 3, CV_AA);
+			cv::line(bgrMat, cv::Point(corners[j].x, corners[j].y), cv::Point(corners[(j + 1) % 4].x, corners[(j + 1) % 4].y), cv::Scalar(255, 255, 255), 1, CV_AA);
 
 		cv::circle(bgrMat, cv::Point(corners[0].x, corners[0].y), 5, cv::Scalar(50, 255, 50), -1, CV_AA);
 		for (int j = 0; j < 4; j++)
-			cv::line(bgrMat, cv::Point(corners[j].x, corners[j].y), cv::Point(corners[(j + 1) % 4].x, corners[(j + 1) % 4].y), cv::Scalar(50, 255, 50), 2, CV_AA);
+			cv::line(bgrMat, cv::Point(corners[j].x, corners[j].y), cv::Point(corners[(j + 1) % 4].x, corners[(j + 1) % 4].y), cv::Scalar(50, 255, 50), 1, CV_AA);
 
 		cv::circle(bgrMat, cv::Point(center.x, center.y), 6, cv::Scalar(255, 255, 255), -1, CV_AA);
 		cv::circle(bgrMat, cv::Point(center.x, center.y), 5, cv::Scalar(50, 255, 50), -1, CV_AA);

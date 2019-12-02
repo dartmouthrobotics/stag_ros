@@ -1,4 +1,4 @@
-#include <windows.h>
+//#include <windows.h>
 #include <stdio.h>
 #include <math.h>
 
@@ -1069,57 +1069,57 @@ void ShowJointPoints(char *file, EdgeMap *map, unsigned char *jointPoints, unsig
 ///-------------------------------------------------------------------
 /// Get all files in a directory in an array
 ///
-int GetFilenamesInDirectory(char *dirname, DirectoryEntry *items){
-  BOOL            fFinished;
-  HANDLE          hList;
-  TCHAR           szDir[MAX_PATH+1];
-  WIN32_FIND_DATA FileData;
-  char            filename[100];
-
-  // Get the proper directory path
-  //Burak - added (char*) typecast below line
-  sprintf((char*)szDir, "%s\\*", dirname);
-
-  // Get the first file
-  hList = FindFirstFile(szDir, &FileData);
-  if (hList == INVALID_HANDLE_VALUE) return 0;
-
-  int noItems = 0;
-
-  // Traverse through the directory structure
-  fFinished = FALSE;
-  while (!fFinished){
-    SYSTEMTIME sysTime;
-    FileTimeToSystemTime(&FileData.ftCreationTime, &sysTime);
-
-    if ((FileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == false){
-      // Only take files
-      sprintf(filename, "%s%s", dirname, FileData.cFileName);
-
-      // Insert into items in sorted order
-      int index = noItems-1;
-      while (index >= 0){
-        if (strcmp(items[index].filename, filename) < 0) break;
-        items[index+1] = items[index];
-        index--;
-      } //end-while
-    
-      index++;
-      strcpy(items[index].filename, filename);
-      noItems++;
-    } //end-if
-
-    if (!FindNextFile(hList, &FileData)){
-        if (GetLastError() == ERROR_NO_MORE_FILES){
-            fFinished = TRUE;
-        } //end-if
-    } //end-if
-  } //end-while            
-
-  FindClose(hList);
-
-  return noItems;
-} //end-GetFilenamesInDirectory
+//int GetFilenamesInDirectory(char *dirname, DirectoryEntry *items){
+//  BOOL            fFinished;
+//  HANDLE          hList;
+//  TCHAR           szDir[MAX_PATH+1];
+//  WIN32_FIND_DATA FileData;
+//  char            filename[100];
+//
+//  // Get the proper directory path
+//  //Burak - added (char*) typecast below line
+//  sprintf((char*)szDir, "%s\\*", dirname);
+//
+//  // Get the first file
+//  hList = FindFirstFile(szDir, &FileData);
+//  if (hList == INVALID_HANDLE_VALUE) return 0;
+//
+//  int noItems = 0;
+//
+//  // Traverse through the directory structure
+//  fFinished = FALSE;
+//  while (!fFinished){
+//    SYSTEMTIME sysTime;
+//    FileTimeToSystemTime(&FileData.ftCreationTime, &sysTime);
+//
+//    if ((FileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == false){
+//      // Only take files
+//      sprintf(filename, "%s%s", dirname, FileData.cFileName);
+//
+//      // Insert into items in sorted order
+//      int index = noItems-1;
+//      while (index >= 0){
+//        if (strcmp(items[index].filename, filename) < 0) break;
+//        items[index+1] = items[index];
+//        index--;
+//      } //end-while
+//    
+//      index++;
+//      strcpy(items[index].filename, filename);
+//      noItems++;
+//    } //end-if
+//
+//    if (!FindNextFile(hList, &FileData)){
+//        if (GetLastError() == ERROR_NO_MORE_FILES){
+//            fFinished = TRUE;
+//        } //end-if
+//    } //end-if
+//  } //end-while            
+//
+//  FindClose(hList);
+//
+//  return noItems;
+//} //end-GetFilenamesInDirectory
 
 ///-----------------------------------------------------------------------------
 /// Scales a given image
