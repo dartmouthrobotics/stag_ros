@@ -12,6 +12,8 @@ public:
 	Marker(const Quad &q, int inId);
 	Marker(const Marker &m);
 	void shiftCorners2(int shift);
+
+    void getPose(cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation);
 };
 
 #endif

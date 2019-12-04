@@ -17,12 +17,16 @@ Stag::Stag(int libraryHD, int inErrorCorrection, bool inKeepLogs)
 }
 
 
-void Stag::detectMarkers(Mat inImage)
+size_t Stag::detectMarkers(const cv::Mat& inImage)
 {
+    markers.clear();
+
 	image = inImage;
 	quadDetector.detectQuads(image, &edInterface);
 
 	vector<Quad> quads = quadDetector.getQuads();
+
+    std::vector<int> decodedMarkersIds;
 
 	for (int indQuad = 0; indQuad < quads.size(); indQuad++)
 	{
@@ -32,67 +36,22 @@ void Stag::detectMarkers(Mat inImage)
 		int id;
 		if (decoder.decode(c, errorCorrection, id, shift))
 		{
-			Marker marker(quads[indQuad], id);
-			marker.shiftCorners2(shift);
-			markers.push_back(marker);
+            if (std::find(decodedMarkersIds.begin(), decodedMarkersIds.end(), id) == decodedMarkersIds.end()) {
+                Marker marker(quads[indQuad], id);
+                marker.shiftCorners2(shift);
+                markers.push_back(marker);
+                decodedMarkersIds.push_back(id);
+            }
 		}
 		else if (keepLogs)
 			falseCandidates.push_back(quads[indQuad]);
 	}
 
-    if (markers.size() > 0) {
-        std::cout << "~~~~~~~~~~~~~~~~~" << std::endl;
-    }
-
 	for (int indMarker = 0; indMarker < markers.size(); indMarker++) {
 		poseRefiner.refineMarkerPose(&edInterface, markers[indMarker]);
-
-        std::cout << "Marker " << markers[indMarker].id << " num marker " << markers.size() << std::endl;
-        std::cout << "Center " << markers[indMarker].center << std::endl;
-
-        cv::Mat camera_matrix(3, 3, CV_64FC1);
-
-        camera_matrix.at<double>(0, 0) = 1045.511199;
-        camera_matrix.at<double>(0, 1) = 0.0;
-        camera_matrix.at<double>(0, 2) = 988.393471;
-        camera_matrix.at<double>(1, 0) = 0.0;
-        camera_matrix.at<double>(1, 1) = 1047.393049;
-        camera_matrix.at<double>(1, 2) = 461.808022;
-        camera_matrix.at<double>(2, 0) = 0.000000;
-        camera_matrix.at<double>(2, 1) = 0.000000;
-        camera_matrix.at<double>(2, 2) = 1.000000;
-
-        cv::Mat distortion_coefficients(5, 1, CV_64FC1);
-        distortion_coefficients.at<double>(1, 0) = -0.009051;
-        distortion_coefficients.at<double>(2, 0) = 0.036079;
-        distortion_coefficients.at<double>(3, 0) = 0.003481;
-        distortion_coefficients.at<double>(4, 0) = 0.003640;
-        distortion_coefficients.at<double>(5, 0) = 0.000000;
-
-        std::vector<cv::Point3f> object_points;
-        object_points.push_back(cv::Point3f(0.5, 0.5, 0.0));
-        object_points.push_back(cv::Point3f(0, 0, 0.0));
-        object_points.push_back(cv::Point3f(1.0, 0, 0.0));
-        object_points.push_back(cv::Point3f(1.0, 1.0, 0.0));
-        object_points.push_back(cv::Point3f(0, 1.0, 0.0));
-
-        std::vector<cv::Point2f> image_points;
-        image_points.push_back(markers[indMarker].center);
-
-        image_points.push_back(markers[indMarker].corners[0]);
-        image_points.push_back(markers[indMarker].corners[1]);
-        image_points.push_back(markers[indMarker].corners[2]);
-        image_points.push_back(markers[indMarker].corners[3]);
-
-        cv::Mat rotation_vec;
-        cv::Mat translation_vec;
-        cv::solvePnP(object_points, image_points, camera_matrix, distortion_coefficients, rotation_vec, translation_vec);
-
-        std::cout << "Translation: " << translation_vec << std::endl;
-        std::cout << "Rotation: " << rotation_vec << std::endl;
     }
 
-    markers.clear();
+    return markers.size();
 }
 
 

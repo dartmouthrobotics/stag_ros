@@ -61,3 +61,33 @@ void Marker::shiftCorners2(int shift)
 	// have to recalculate homography after shift
 	estimateHomography();
 }
+
+void Marker::getPose(cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation) {
+    // returns the result of solving the PnP problem
+    std::vector<cv::Point3f> objectPoints;
+    objectPoints.push_back((cv::Point3f(0.5, 0.5, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+    objectPoints.push_back((cv::Point3f(0.0, 0.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+    objectPoints.push_back((cv::Point3f(1.0, 0.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+    objectPoints.push_back((cv::Point3f(1.0, 1.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+    objectPoints.push_back((cv::Point3f(0.0, 1.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+
+    std::vector<cv::Point2f> imagePoints;
+
+    imagePoints.push_back(center);
+    imagePoints.push_back(corners[0]);
+    imagePoints.push_back(corners[1]);
+    imagePoints.push_back(corners[2]);
+    imagePoints.push_back(corners[3]);
+
+    cv::Mat rotationRodrigues;
+    cv::Mat translation;
+
+    cv::solvePnP(
+        objectPoints,
+        imagePoints,
+        cameraMatrix,
+        distortionCoefficients,
+        resultRotation,
+        resultTranslation
+    );
+}

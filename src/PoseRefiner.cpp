@@ -10,7 +10,7 @@ Mat optEllipse;
 class Refine;
 
 
-void PoseRefiner::refineMarkerPose(EDInterface* edInterface, Marker& marker)
+bool PoseRefiner::refineMarkerPose(EDInterface* edInterface, Marker& marker)
 {
 	// we find an edge segment loop that belongs to the circular border, and fit an ellipse to it
 	// the edge segment loop needs pass closely to the circular border when backprojected
@@ -109,7 +109,7 @@ void PoseRefiner::refineMarkerPose(EDInterface* edInterface, Marker& marker)
 
 	// do not refine the pose if none of the edge segments were satisfactory
 	if (indChosenSegment == -1)
-		return;
+		return false;
 		
 
 	// fit an ellipse to the edge pixels
@@ -164,6 +164,8 @@ void PoseRefiner::refineMarkerPose(EDInterface* edInterface, Marker& marker)
 	marker.corners[1] = projectPoint(Point2d(1, 0), marker.H);
 	marker.corners[2] = projectPoint(Point2d(1, 1), marker.H);
 	marker.corners[3] = projectPoint(Point2d(0, 1), marker.H);
+
+    return true;
 }
 
 
