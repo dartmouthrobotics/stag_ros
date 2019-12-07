@@ -10,8 +10,22 @@
 Stag* stag;
 ros::Publisher pose_publisher;
 
-std::string CAMERA_FRAME = "/v4l_frame";
 tf::TransformBroadcaster* transform_broadcaster = NULL;
+
+cv::Mat camera_matrix;
+bool have_camera_info = false;
+std::string camera_frame_id;
+std::string marker_frame_prefix;
+std::map<int, double> marker_size_by_id;
+double default_marker_size;
+
+double get_marker_size(size_t marker_id) {
+    try {
+        return marker_size_by_id.at(marker_id);
+    } catch (std::out_of_range ex) {
+        return default_marker_size;
+    }
+}
 
 geometry_msgs::PoseStamped cv_to_pose_stamped(cv::Mat translation, cv::Mat rotation, std::string frame_id, ros::Time stamp) {
     geometry_msgs::PoseStamped pose_msg;
@@ -78,12 +92,16 @@ tf::StampedTransform pose_stamped_to_transform(geometry_msgs::PoseStamped pose_m
 }
 
 void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
+    if (!have_camera_info) {
+        return;
+    }
+
     auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
     auto num_tags = stag->detectMarkers(cv_ptr->image);
 
-    cv::Mat camera_matrix = (cv::Mat1d(3, 3)<< 1066.342505, 0.000000, 940.432119, 0.000000, 1065.381509, 552.184409, 0.000000, 0.000000, 1.000000);
+    // using zero distortion for now partly because ar track alvar does this too
+    // adding in distortion causes weird behavior.
     cv::Mat distortion_coefficients(5, 1, CV_32FC1);
-
     distortion_coefficients = 0.0;
 
     if (num_tags > 0) {
@@ -91,10 +109,11 @@ void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
             cv::Mat translation;
             cv::Mat rotation;
 
-            detected_marker.getPose(camera_matrix, distortion_coefficients, 0.172, rotation, translation);
+            double marker_size_meters = get_marker_size(detected_marker.id);
+            detected_marker.getPose(camera_matrix, distortion_coefficients, marker_size_meters, rotation, translation);
 
-            auto pose_msg = cv_to_pose_stamped(translation, rotation, "/v4l_frame", image_message->header.stamp);
-            auto marker_transform = pose_stamped_to_transform(pose_msg, "/v4l_frame", "/stag_marker_" + std::to_string(detected_marker.id));
+            auto pose_msg = cv_to_pose_stamped(translation, rotation, camera_frame_id, image_message->header.stamp);
+            auto marker_transform = pose_stamped_to_transform(pose_msg, camera_frame_id, marker_frame_prefix + std::to_string(detected_marker.id));
 
             transform_broadcaster->sendTransform(marker_transform);
             pose_publisher.publish(pose_msg);
@@ -102,18 +121,48 @@ void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
     }
 }
 
+void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
+    //camera_matrix = (cv::Mat1d(3, 3)<< 1066.342505, 0.000000, 940.432119, 0.000000, 1065.381509, 552.184409, 0.000000, 0.000000, 1.000000);
+    camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
+    have_camera_info = true;
+}
+
+void parse_marker_sizes(ros::NodeHandle& private_node_handle) {
+    XmlRpc::XmlRpcValue marker_sizes_list;
+    private_node_handle.getParam("marker_sizes_by_id", marker_sizes_list);
+
+    ROS_ASSERT(marker_sizes_list.getType() == XmlRpc::XmlRpcValue::TypeArray);
+
+    for (size_t i = 0; i < marker_sizes_list.size(); ++i) {
+        ROS_ASSERT(marker_sizes_list[i].getType() == XmlRpc::XmlRpcValue::TypeStruct);
+        marker_size_by_id[marker_sizes_list[i]["id"]] = marker_sizes_list[i]["size"];
+    }
+}
+
 int main(int argc, char** argv) {
     ros::init(argc, argv, "stag_ros_test");
 
-    ros::NodeHandle node_handle;
+    ros::NodeHandle node_handle, private_node_handle("~");
     image_transport::ImageTransport _image_transport(node_handle);
 
-    auto image_subscriber = _image_transport.subscribe("/cv_camera/image_raw", 1, image_callback);
+    std::string camera_image_topic, camera_info_topic;
+    int tag_id_type;
+
+    private_node_handle.getParam("camera_image_topic", camera_image_topic);
+    private_node_handle.getParam("camera_info_topic", camera_info_topic);
+    private_node_handle.getParam("camera_frame_id", camera_frame_id);
+    private_node_handle.getParam("tag_id_type", tag_id_type);
+    private_node_handle.getParam("marker_frame_prefix", marker_frame_prefix);
+    private_node_handle.getParam("default_marker_size", default_marker_size);
+    parse_marker_sizes(private_node_handle);
+
+    auto image_subscriber = _image_transport.subscribe(camera_image_topic, 1, image_callback);
+    auto camera_info_subscriber = node_handle.subscribe(camera_info_topic, 1, camera_info_callback);
     pose_publisher = node_handle.advertise<geometry_msgs::PoseStamped>("/test_stag_ros/pose", 100);
 
     transform_broadcaster = new tf::TransformBroadcaster();
 
-    stag = new Stag(21, 7, true);
+    stag = new Stag(tag_id_type, 7, false);
 
     ros::spin();
 

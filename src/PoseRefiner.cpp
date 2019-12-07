@@ -42,12 +42,14 @@ bool PoseRefiner::refineMarkerPose(EDInterface* edInterface, Marker& marker)
 	for (int indEdgeSegment = 0; indEdgeSegment < edgeMap->noSegments; indEdgeSegment++)
 	{
 		// skip if the edge segment is too short
-		if (edgeMap->segments[indEdgeSegment].noPixels < minEdgeSegmentLength)
+		if (edgeMap->segments[indEdgeSegment].noPixels < minEdgeSegmentLength) {
 			continue;
+        }
 
 		// skip if the edge segment is not a loop
-		if (squaredDistance(Point2d(edgeMap->segments[indEdgeSegment].pixels[0].c, edgeMap->segments[indEdgeSegment].pixels[0].r), Point2d(edgeMap->segments[indEdgeSegment].pixels[edgeMap->segments[indEdgeSegment].noPixels - 1].c, edgeMap->segments[indEdgeSegment].pixels[edgeMap->segments[indEdgeSegment].noPixels - 1].r)) > loopThres * loopThres)
+		if (squaredDistance(Point2d(edgeMap->segments[indEdgeSegment].pixels[0].c, edgeMap->segments[indEdgeSegment].pixels[0].r), Point2d(edgeMap->segments[indEdgeSegment].pixels[edgeMap->segments[indEdgeSegment].noPixels - 1].c, edgeMap->segments[indEdgeSegment].pixels[edgeMap->segments[indEdgeSegment].noPixels - 1].r)) > loopThres * loopThres) {
 			continue;
+        }
 
 		// sample the edge segment, skip if any parts are outside the marker
 		bool skipBecauseOutside = false;
