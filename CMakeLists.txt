@@ -9,10 +9,10 @@ find_package(catkin REQUIRED COMPONENTS
   tf
   image_transport
   cv_bridge
+  ar_track_alvar_msgs
 )
 
 catkin_package(
-    #    INCLUDE_DIRS include
     CATKIN_DEPENDS std_msgs roscpp image_transport image_transport
 )
 

@@ -4,20 +4,28 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <tf/LinearMath/Matrix3x3.h>
 #include <tf/transform_broadcaster.h>
+#include <tf/transform_listener.h>
+#include <ar_track_alvar_msgs/AlvarMarkers.h>
 
 #include "Stag.h"
 
 Stag* stag;
-ros::Publisher pose_publisher;
+ros::Publisher marker_message_publisher;
 
 tf::TransformBroadcaster* transform_broadcaster = NULL;
+tf::TransformListener* transform_listener = NULL;
+
+// need to publish the alvar markers message.
 
 cv::Mat camera_matrix;
 bool have_camera_info = false;
-std::string camera_frame_id;
 std::string marker_frame_prefix;
+std::string output_frame_id;
+std::string marker_message_topic;
 std::map<int, double> marker_size_by_id;
 double default_marker_size;
+int frame_number = 0;
+
 
 double get_marker_size(size_t marker_id) {
     try {
@@ -27,8 +35,14 @@ double get_marker_size(size_t marker_id) {
     }
 }
 
-geometry_msgs::PoseStamped cv_to_pose_stamped(cv::Mat translation, cv::Mat rotation, std::string frame_id, ros::Time stamp) {
-    geometry_msgs::PoseStamped pose_msg;
+// add publishing of all of the tags to a message
+// add support for rviz
+
+// add support for transforming to an output frame
+// add support for marker bundles.
+
+tf::StampedTransform cv_to_tf_transform(cv::Mat translation, cv::Mat rotation, std::string image_frame_id, std::string marker_frame_id, ros::Time stamp) {
+    tf::Transform marker_transform;
 
     cv::Mat rotation_matrix(3, 3, CV_64FC1);
     cv::Rodrigues(rotation, rotation_matrix);
@@ -45,57 +59,59 @@ geometry_msgs::PoseStamped cv_to_pose_stamped(cv::Mat translation, cv::Mat rotat
         rotation_matrix.at<double>(2, 2)
     );
 
+    tf::Vector3 translation_tf(translation.at<double>(0), translation.at<double>(1), translation.at<double>(2));
+
     tf::Quaternion rotationQuat;
     rotation_matrix_tf.getRotation(rotationQuat);
 
-    pose_msg.header.frame_id = frame_id;
-    pose_msg.header.stamp = stamp;
-
-    pose_msg.pose.position.x = translation.at<double>(0);
-    pose_msg.pose.position.y = translation.at<double>(1);
-    pose_msg.pose.position.z = translation.at<double>(2);
-
-    pose_msg.pose.orientation.x = rotationQuat.x();
-    pose_msg.pose.orientation.y = rotationQuat.y();
-    pose_msg.pose.orientation.z = rotationQuat.z();
-    pose_msg.pose.orientation.w = rotationQuat.w();
-
-    return pose_msg;
-}
-
-tf::StampedTransform pose_stamped_to_transform(geometry_msgs::PoseStamped pose_msg, std::string parent_frame, std::string child_frame) {
-    tf::Vector3 translation(
-        pose_msg.pose.position.x,
-        pose_msg.pose.position.y,
-        pose_msg.pose.position.z
-    );
-
-    tf::Quaternion orientation(
-        pose_msg.pose.orientation.x,
-        pose_msg.pose.orientation.y,
-        pose_msg.pose.orientation.z,
-        pose_msg.pose.orientation.w
-    );
-
-    tf::Transform marker_transform;
-    marker_transform.setOrigin(translation);
-    marker_transform.setRotation(orientation);
+    marker_transform.setOrigin(translation_tf);
+    marker_transform.setRotation(rotationQuat);
 
     tf::StampedTransform result(
         marker_transform,
-        pose_msg.header.stamp,
-        parent_frame,
-        child_frame
+        stamp,
+        image_frame_id,
+        marker_frame_id 
     );
 
     return result;
 }
+
+
+geometry_msgs::PoseStamped tf_to_pose_stamped(tf::Transform transform, std::string pose_frame_id, ros::Time stamp) {
+    geometry_msgs::PoseStamped result;
+
+    result.header.stamp = stamp;
+    result.header.frame_id = pose_frame_id;
+
+    result.pose.position.x = transform.getOrigin().x();
+    result.pose.position.y = transform.getOrigin().y();
+    result.pose.position.z = transform.getOrigin().z();
+
+    result.pose.orientation.x = transform.getRotation().x();
+    result.pose.orientation.y = transform.getRotation().y();
+    result.pose.orientation.z = transform.getRotation().z();
+    result.pose.orientation.w = transform.getRotation().w();
+
+    return result;
+}
+
+
+void publish_rviz_messages() {
+
+}
+
 
 void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
     if (!have_camera_info) {
         return;
     }
 
+    auto image_frame_id = image_message->header.frame_id;
+    auto image_time_stamp = image_message->header.stamp;
+
+    tf::StampedTransform camera_to_output_frame;
+    transform_listener->lookupTransform(output_frame_id, image_message->header.frame_id, ros::Time(0), camera_to_output_frame);
     auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
     auto num_tags = stag->detectMarkers(cv_ptr->image);
 
@@ -104,28 +120,56 @@ void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
     cv::Mat distortion_coefficients(5, 1, CV_32FC1);
     distortion_coefficients = 0.0;
 
+    ar_track_alvar_msgs::AlvarMarkers markers_message;
+
     if (num_tags > 0) {
         for (auto& detected_marker : stag->markers) {
             cv::Mat translation;
             cv::Mat rotation;
 
+            std::string marker_frame_id = marker_frame_prefix + std::to_string(detected_marker.id);
+
             double marker_size_meters = get_marker_size(detected_marker.id);
             detected_marker.getPose(camera_matrix, distortion_coefficients, marker_size_meters, rotation, translation);
 
-            auto pose_msg = cv_to_pose_stamped(translation, rotation, camera_frame_id, image_message->header.stamp);
-            auto marker_transform = pose_stamped_to_transform(pose_msg, camera_frame_id, marker_frame_prefix + std::to_string(detected_marker.id));
+            auto camera_to_marker_transform = cv_to_tf_transform(
+                translation,
+                rotation,
+                image_frame_id,
+                marker_frame_id,
+                image_time_stamp 
+            );
 
-            transform_broadcaster->sendTransform(marker_transform);
-            pose_publisher.publish(pose_msg);
+            auto output_to_marker_transform = camera_to_output_frame * camera_to_marker_transform;
+            auto marker_pose_output_frame = tf_to_pose_stamped(
+                output_to_marker_transform,
+                output_frame_id, 
+                image_time_stamp
+            );
+
+            transform_broadcaster->sendTransform(camera_to_marker_transform);
+
+            ar_track_alvar_msgs::AlvarMarker serialized_marker;
+
+            serialized_marker.id = detected_marker.id;
+            serialized_marker.pose = marker_pose_output_frame;
+            serialized_marker.header.stamp = ros::Time::now();
+            markers_message.markers.push_back(serialized_marker);
         }
     }
+
+    markers_message.header.stamp = ros::Time::now();
+    markers_message.header.seq = frame_number++;
+    markers_message.header.frame_id = output_frame_id;
+    marker_message_publisher.publish(markers_message);
 }
 
+
 void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
-    //camera_matrix = (cv::Mat1d(3, 3)<< 1066.342505, 0.000000, 940.432119, 0.000000, 1065.381509, 552.184409, 0.000000, 0.000000, 1.000000);
     camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
     have_camera_info = true;
 }
+
 
 void parse_marker_sizes(ros::NodeHandle& private_node_handle) {
     XmlRpc::XmlRpcValue marker_sizes_list;
@@ -139,6 +183,12 @@ void parse_marker_sizes(ros::NodeHandle& private_node_handle) {
     }
 }
 
+
+void parse_marker_bundles(ros::NodeHandle& private_node_handle) {
+
+}
+
+
 int main(int argc, char** argv) {
     ros::init(argc, argv, "stag_ros_test");
 
@@ -150,17 +200,23 @@ int main(int argc, char** argv) {
 
     private_node_handle.getParam("camera_image_topic", camera_image_topic);
     private_node_handle.getParam("camera_info_topic", camera_info_topic);
-    private_node_handle.getParam("camera_frame_id", camera_frame_id);
     private_node_handle.getParam("tag_id_type", tag_id_type);
     private_node_handle.getParam("marker_frame_prefix", marker_frame_prefix);
     private_node_handle.getParam("default_marker_size", default_marker_size);
+    private_node_handle.getParam("output_frame_id", output_frame_id);
+    private_node_handle.getParam("marker_message_topic", marker_message_topic);
+
     parse_marker_sizes(private_node_handle);
+    parse_marker_bundles(private_node_handle);
 
     auto image_subscriber = _image_transport.subscribe(camera_image_topic, 1, image_callback);
     auto camera_info_subscriber = node_handle.subscribe(camera_info_topic, 1, camera_info_callback);
-    pose_publisher = node_handle.advertise<geometry_msgs::PoseStamped>("/test_stag_ros/pose", 100);
+
+    // node handle where alvar_markers messages are published.
+    marker_message_publisher = node_handle.advertise<ar_track_alvar_msgs::AlvarMarkers>(marker_message_topic, 100);
 
     transform_broadcaster = new tf::TransformBroadcaster();
+    transform_listener = new tf::TransformListener();
 
     stag = new Stag(tag_id_type, 7, false);
 
@@ -168,4 +224,5 @@ int main(int argc, char** argv) {
 
     delete stag;
     delete transform_broadcaster;
+    delete transform_listener;
 }
