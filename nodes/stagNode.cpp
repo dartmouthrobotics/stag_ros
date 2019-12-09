@@ -173,7 +173,12 @@ void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg
 
 void parse_marker_sizes(ros::NodeHandle& private_node_handle) {
     XmlRpc::XmlRpcValue marker_sizes_list;
-    private_node_handle.getParam("marker_sizes_by_id", marker_sizes_list);
+    bool param_success = private_node_handle.getParam("marker_sizes_by_id", marker_sizes_list);
+
+    if (!param_success) {
+        ROS_WARN("Could not parse marker_sizes_list or param was not provided. Ignoring.");
+        return;
+    }
 
     ROS_ASSERT(marker_sizes_list.getType() == XmlRpc::XmlRpcValue::TypeArray);
 
