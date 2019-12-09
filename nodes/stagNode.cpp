@@ -8,6 +8,7 @@
 #include <ar_track_alvar_msgs/AlvarMarkers.h>
 
 #include "Stag.h"
+#include "Marker.h"
 
 Stag* stag;
 ros::Publisher marker_message_publisher;
@@ -33,6 +34,41 @@ double get_marker_size(size_t marker_id) {
     } catch (std::out_of_range ex) {
         return default_marker_size;
     }
+}
+
+void get_marker_pose(const Marker& marker, cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation) {
+    // returns the result of solving the PnP problem
+    std::vector<cv::Point3f> objectPoints;
+    objectPoints.push_back((cv::Point3f(0.5, 0.5, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+
+    objectPoints.push_back((cv::Point3f(1.0, 0.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+    objectPoints.push_back((cv::Point3f(0.0, 0.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+
+    objectPoints.push_back((cv::Point3f(0.0, 1.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+    objectPoints.push_back((cv::Point3f(1.0, 1.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
+
+    // 0,0 -> 1,0
+    // 1,0 -> 0,0
+
+    std::vector<cv::Point2f> imagePoints;
+
+    imagePoints.push_back(marker.center);
+    imagePoints.push_back(marker.corners[0]);
+    imagePoints.push_back(marker.corners[1]);
+    imagePoints.push_back(marker.corners[2]);
+    imagePoints.push_back(marker.corners[3]);
+
+    cv::Mat rotationRodrigues;
+    cv::Mat translation;
+
+    cv::solvePnP(
+        objectPoints,
+        imagePoints,
+        cameraMatrix,
+        distortionCoefficients,
+        resultRotation,
+        resultTranslation
+    );
 }
 
 // add publishing of all of the tags to a message
@@ -111,7 +147,14 @@ void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
     auto image_time_stamp = image_message->header.stamp;
 
     tf::StampedTransform camera_to_output_frame;
-    transform_listener->lookupTransform(output_frame_id, image_message->header.frame_id, ros::Time(0), camera_to_output_frame);
+
+    try {
+        transform_listener->lookupTransform(output_frame_id, image_message->header.frame_id, ros::Time(0), camera_to_output_frame);
+    } catch(tf::LookupException err) {
+        ROS_WARN("Could get transformation from camera to output frame. Cannot process image.");
+        ROS_WARN(err.what());
+    }
+
     auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
     auto num_tags = stag->detectMarkers(cv_ptr->image);
 
@@ -130,7 +173,7 @@ void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
             std::string marker_frame_id = marker_frame_prefix + std::to_string(detected_marker.id);
 
             double marker_size_meters = get_marker_size(detected_marker.id);
-            detected_marker.getPose(camera_matrix, distortion_coefficients, marker_size_meters, rotation, translation);
+            get_marker_pose(detected_marker, camera_matrix, distortion_coefficients, marker_size_meters, rotation, translation);
 
             auto camera_to_marker_transform = cv_to_tf_transform(
                 translation,
