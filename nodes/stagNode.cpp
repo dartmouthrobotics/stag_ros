@@ -19,6 +19,7 @@ tf::TransformListener* transform_listener = NULL;
 // need to publish the alvar markers message.
 
 cv::Mat camera_matrix;
+cv::Mat distortion_coefficients;
 bool have_camera_info = false;
 std::string marker_frame_prefix;
 std::string output_frame_id;
@@ -139,7 +140,7 @@ bool marker_is_in_bundle(int id) {
 }
 
 
-std::vector<AlvarMarker> get_transforms_for_individual_markers(const std::vector<Marker>& markers, tf::StampedTransform camera_to_output_frame, std::string image_frame_id, ros::Time image_time_stamp) {
+std::vector<ar_track_alvar_msgs::AlvarMarker> get_transforms_for_individual_markers(const std::vector<Marker>& markers, tf::StampedTransform camera_to_output_frame, std::string image_frame_id, ros::Time image_time_stamp) {
     std::vector<ar_track_alvar_msgs::AlvarMarker> alvar_markers;
 
     for (auto& detected_marker : stag->markers) {
@@ -177,7 +178,7 @@ std::vector<AlvarMarker> get_transforms_for_individual_markers(const std::vector
         serialized_marker.id = detected_marker.id;
         serialized_marker.pose = marker_pose_output_frame;
         serialized_marker.header.stamp = ros::Time::now();
-        alvar_markers.markers.push_back(serialized_marker);
+        alvar_markers.push_back(serialized_marker);
     }
 
     return alvar_markers;
@@ -214,8 +215,6 @@ void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
 
     // using zero distortion for now partly because ar track alvar does this too
     // adding in distortion causes weird behavior.
-    cv::Mat distortion_coefficients(5, 1, CV_32FC1);
-    distortion_coefficients = 0.0;
 
     ar_track_alvar_msgs::AlvarMarkers markers_message;
 
@@ -264,6 +263,9 @@ void parse_marker_bundles(ros::NodeHandle& private_node_handle) {
 
 int main(int argc, char** argv) {
     ros::init(argc, argv, "stag_ros_test");
+
+    distortion_coefficients = cv::Mat(5, 1, CV_32FC1);
+    distortion_coefficients = 0.0;
 
     ros::NodeHandle node_handle, private_node_handle("~");
     image_transport::ImageTransport _image_transport(node_handle);
