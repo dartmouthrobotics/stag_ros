@@ -36,6 +36,10 @@ double get_marker_size(size_t marker_id) {
     }
 }
 
+// say we have many bundles
+// we have a list of detected markers, and we have a set of bundles which are mappings between marker ids and corners.
+
+
 void get_marker_pose(const Marker& marker, cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation) {
     // returns the result of solving the PnP problem
     std::vector<cv::Point3f> objectPoints;
@@ -136,6 +140,7 @@ void publish_rviz_messages() {
 
 
 void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
+    std::cout << "Got frame" << std::endl;
     if (!have_camera_info) {
         return;
     }
