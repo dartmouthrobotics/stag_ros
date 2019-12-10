@@ -193,42 +193,43 @@ std::vector<ar_track_alvar_msgs::AlvarMarker> get_transforms_for_bundled_markers
 // then for each bundle, if at least one tag in the bundle is visible, find the pose for the bundle and publish that.
 void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
     std::cout << "Got frame " << ros::Time::now() << std::endl;
-    //if (!have_camera_info) {
-    //    return;
-    //}
+    if (!have_camera_info) {
+        return;
+    }
 
-    //auto image_frame_id = image_message->header.frame_id;
-    //auto image_time_stamp = image_message->header.stamp;
+    auto image_frame_id = image_message->header.frame_id;
+    auto image_time_stamp = image_message->header.stamp;
 
-    //tf::StampedTransform camera_to_output_frame;
+    tf::StampedTransform camera_to_output_frame;
 
-    //try {
-    //    transform_listener->lookupTransform(output_frame_id, image_message->header.frame_id, ros::Time(0), camera_to_output_frame);
-    //} catch(tf::LookupException err) {
-    //    ROS_WARN("Could get transformation from camera to output frame. Cannot process image.");
-    //    ROS_WARN(err.what());
-    //    return;
-    //}
+    try {
+        transform_listener->lookupTransform(output_frame_id, image_message->header.frame_id, ros::Time(0), camera_to_output_frame);
+    } catch(tf::LookupException err) {
+        ROS_WARN("Could get transformation from camera to output frame. Cannot process image.");
+        ROS_WARN(err.what());
+        return;
+    }
 
-    //auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
-    //auto num_tags = stag->detectMarkers(cv_ptr->image);
+    auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
+    auto num_tags = stag->detectMarkers(cv_ptr->image);
 
-    //// using zero distortion for now partly because ar track alvar does this too
-    //// adding in distortion causes weird behavior.
+    // using zero distortion for now partly because ar track alvar does this too
+    // adding in distortion causes weird behavior.
 
-    //ar_track_alvar_msgs::AlvarMarkers markers_message;
+    ar_track_alvar_msgs::AlvarMarkers markers_message;
 
-    //if (num_tags > 0) {
-    //    auto individual_marker_messages = get_transforms_for_individual_markers(stag->markers, camera_to_output_frame, image_frame_id, image_time_stamp);
-    //    markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
+    if (num_tags > 0) {
+        auto individual_marker_messages = get_transforms_for_individual_markers(stag->markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+        markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
 
-    //    auto bundle_marker_messages = get_transforms_for_bundled_markers(stag->markers, camera_to_output_frame, image_frame_id, image_time_stamp);
-    //}
+        auto bundle_marker_messages = get_transforms_for_bundled_markers(stag->markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+    }
 
-    //markers_message.header.stamp = ros::Time::now();
-    //markers_message.header.seq = frame_number++;
-    //markers_message.header.frame_id = output_frame_id;
-    //marker_message_publisher.publish(markers_message);
+    markers_message.header.stamp = ros::Time::now();
+    markers_message.header.seq = frame_number++;
+    markers_message.header.frame_id = output_frame_id;
+    marker_message_publisher.publish(markers_message);
+    std::cout << "End frame " << ros::Time::now() << std::endl;
 }
 
 
