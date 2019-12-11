@@ -280,7 +280,7 @@ public:
         distortion_coefficients = cv::Mat(5, 1, CV_32FC1);
         distortion_coefficients = 0.0;
 
-        ros::NodeHandle& private_node_handle = getPrivateNodeHandle();
+        ros::NodeHandle& private_node_handle = getMTPrivateNodeHandle();
         image_transport::ImageTransport _image_transport(private_node_handle);
 
         std::string camera_image_topic, camera_info_topic;
