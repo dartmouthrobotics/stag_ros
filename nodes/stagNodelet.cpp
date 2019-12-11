@@ -297,8 +297,8 @@ public:
         parse_marker_sizes(private_node_handle);
         parse_marker_bundles(private_node_handle);
 
-        image_subscriber = _image_transport.subscribe(camera_image_topic, 10000, &StagNodelet::image_callback, this);
-        camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 10000, &StagNodelet::camera_info_callback, this);
+        image_subscriber = _image_transport.subscribe(camera_image_topic, 10, &StagNodelet::image_callback, this);
+        camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 10, &StagNodelet::camera_info_callback, this);
 
         // node handle where alvar_markers messages are published.
         marker_message_publisher = private_node_handle.advertise<ar_track_alvar_msgs::AlvarMarkers>(marker_message_topic, 100);
