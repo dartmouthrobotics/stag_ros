@@ -1,0 +1,7 @@
+<library path="lib/libstag_ros">
+  <class name="stag_ros/StagNodelet" type="stag_ros::StagNodelet" base_class_type="nodelet::Nodelet">
+    <description> 
+        Wraps STag code into a ROS nodelet for finding ARTags
+    </description>
+  </class>
+</library>

@@ -10,10 +10,12 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   cv_bridge
   ar_track_alvar_msgs
+  nodelet
 )
 
 catkin_package(
-    CATKIN_DEPENDS std_msgs roscpp image_transport image_transport
+    LIBRARIES stag_ros
+    CATKIN_DEPENDS std_msgs roscpp image_transport image_transport nodelet
 )
 
 include_directories(
@@ -31,15 +33,22 @@ LIST(APPEND stag_srcs ${ED_srcs})
 add_library(stag_lib ${stag_srcs})
 target_link_libraries(stag_lib ${OpenCV_LIBS})
 
-add_executable(stag_ros_node nodes/stagNode.cpp)
-target_link_libraries(stag_ros_node 
+add_library(stag_ros nodes/stagNodelet.cpp)
+target_link_libraries(stag_ros
     ${catkin_LIBRARIES}
     stag_lib 
     ${OpenCV_LIBS}
 )
 
-install(TARGETS stag_ros_node
+if(catkin_EXPORTED_LIBRARIES)
+  add_dependencies(stag_ros ${catkin_EXPORTED_LIBRARIES})
+endif()
+
+install(TARGETS stag_ros
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+install(FILES stag_ros.xml
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
