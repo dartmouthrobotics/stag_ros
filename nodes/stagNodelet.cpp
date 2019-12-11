@@ -1,3 +1,5 @@
+#include <array>
+
 #include <ros/ros.h>
 #include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
@@ -34,7 +36,8 @@ public:
     double default_marker_size;
     int frame_number;
 
-    image_transport::Subscriber image_subscriber;
+    std::array<image_transport::Subscriber, 4> image_subscribers;
+    //image_transport::Subscriber image_subscriber;
     ros::Subscriber camera_info_subscriber;
 
     StagNodelet() : 
@@ -297,7 +300,10 @@ public:
         parse_marker_sizes(private_node_handle);
         parse_marker_bundles(private_node_handle);
 
-        image_subscriber = _image_transport.subscribe(camera_image_topic, 10, &StagNodelet::image_callback, this);
+        for (int subscriber_index = 0; subscriber_index < image_subscribers.size(); ++subscriber_index) {
+            image_subscribers[subscriber_index] = _image_transport.subscribe(camera_image_topic, 10, &StagNodelet::image_callback, this);
+        }
+
         camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 10, &StagNodelet::camera_info_callback, this);
 
         // node handle where alvar_markers messages are published.
