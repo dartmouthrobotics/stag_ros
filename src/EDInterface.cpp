@@ -21,6 +21,14 @@ void EDInterface::runEDPFandEDLines(const cv::Mat &image)
 }
 
 
+EDInterface::~EDInterface() {
+    if (edLines != NULL)
+        delete edLines;
+    if (edgeMap != NULL)
+        delete edgeMap;
+}
+
+
 EdgeMap* EDInterface::getEdgeMap()
 {
 	return edgeMap;

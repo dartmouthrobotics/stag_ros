@@ -24,6 +24,8 @@ public:
 
 	// calculates the intersection of two line segments
 	cv::Point2d intersectionOfLineSegments(const LineSegment& line1, const LineSegment& line2);
+
+    ~EDInterface();
 };
 
 #endif
