@@ -211,6 +211,7 @@ public:
     }
 
     void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
+        std::cout << image_message->header.seq << " B " << std::endl;
         if (!have_camera_info) {
             return;
         }
@@ -218,11 +219,15 @@ public:
         auto image_time_stamp = image_message->header.stamp;
 
         auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
+        std::cout << image_message->header.seq << " C " << std::endl;
 
+        std::cout << image_message->header.seq << " D " << std::endl;
         Stag stag(tag_id_type, 7, false);
+        std::cout << image_message->header.seq << " E " << std::endl;
 
         tf::StampedTransform camera_to_output_frame;
 
+        std::cout << image_message->header.seq << " F " << std::endl;
         try {
             transform_listener->lookupTransform(output_frame_id, image_frame_id, ros::Time(0), camera_to_output_frame);
         } catch(tf::LookupException err) {
@@ -230,21 +235,26 @@ public:
             ROS_WARN(err.what());
             return;
         }
+        std::cout << image_message->header.seq << " G " << std::endl;
 
         auto num_tags = stag.detectMarkers(cv_ptr->image);
+        std::cout << image_message->header.seq << " H " << std::endl;
 
         ar_track_alvar_msgs::AlvarMarkers markers_message;
 
+        std::cout << image_message->header.seq << " I " << std::endl;
         if (num_tags > 0) {
             auto individual_marker_messages = get_transforms_for_individual_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
             markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
 
             auto bundle_marker_messages = get_transforms_for_bundled_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
         }
+        std::cout << image_message->header.seq << " J " << std::endl;
 
         markers_message.header.stamp = ros::Time::now();
         markers_message.header.seq = image_message->header.seq;
         markers_message.header.frame_id = output_frame_id;
+        std::cout << image_message->header.seq << " K " << std::endl;
         marker_message_publisher.publish(markers_message);
     }
 
