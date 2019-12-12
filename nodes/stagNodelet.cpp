@@ -18,7 +18,6 @@ namespace stag_ros {
 
 class StagNodelet : public nodelet::Nodelet { 
 public:
-    Stag* stag;
     ros::Publisher marker_message_publisher;
 
     tf::TransformBroadcaster* transform_broadcaster;
@@ -29,22 +28,26 @@ public:
     cv::Mat camera_matrix;
     cv::Mat distortion_coefficients;
     bool have_camera_info;
+    int highest_frame;
     std::string marker_frame_prefix;
     std::string output_frame_id;
     std::string marker_message_topic;
     std::map<int, double> marker_size_by_id;
     double default_marker_size;
     int frame_number;
+    int tag_id_type;
+    boost::shared_ptr<void> this_ptr;
 
-    std::array<image_transport::Subscriber, 4> image_subscribers;
-    //image_transport::Subscriber image_subscriber;
+    ros::Subscriber image_subscriber; 
     ros::Subscriber camera_info_subscriber;
 
     StagNodelet() : 
         transform_broadcaster(NULL), 
         transform_listener(NULL),
         have_camera_info(false),
-        frame_number(0) {};
+        frame_number(0),
+        highest_frame(0)
+        {};
 
 
     double get_marker_size(size_t marker_id) {
@@ -160,7 +163,7 @@ public:
     std::vector<ar_track_alvar_msgs::AlvarMarker> get_transforms_for_individual_markers(const std::vector<Marker>& markers, tf::StampedTransform camera_to_output_frame, std::string image_frame_id, ros::Time image_time_stamp) {
         std::vector<ar_track_alvar_msgs::AlvarMarker> alvar_markers;
 
-        for (auto& detected_marker : stag->markers) {
+        for (auto& detected_marker : markers) {
             if (marker_is_in_bundle(detected_marker.id)) {
                 continue;
             }
@@ -205,48 +208,46 @@ public:
     std::vector<ar_track_alvar_msgs::AlvarMarker> get_transforms_for_bundled_markers(const std::vector<Marker>& markers, tf::StampedTransform camera_to_output_frame, std::string image_frame_id, ros::Time image_time_stamp) {
     }
 
+    void process_image(cv_bridge::CvImage image, std::string image_frame_id, ros::Time image_time_stamp, int seq) {
 
-    // for adding in bundles. For each marker that is an individual, publish that
-    // then for each bundle, if at least one tag in the bundle is visible, find the pose for the bundle and publish that.
+    }
+
     void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
-        std::cout << "Got frame " << ros::Time::now() << std::endl;
         if (!have_camera_info) {
             return;
         }
-
         auto image_frame_id = image_message->header.frame_id;
         auto image_time_stamp = image_message->header.stamp;
+
+        auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
+
+        Stag stag(tag_id_type, 7, false);
 
         tf::StampedTransform camera_to_output_frame;
 
         try {
-            transform_listener->lookupTransform(output_frame_id, image_message->header.frame_id, ros::Time(0), camera_to_output_frame);
+            transform_listener->lookupTransform(output_frame_id, image_frame_id, ros::Time(0), camera_to_output_frame);
         } catch(tf::LookupException err) {
             ROS_WARN("Could get transformation from camera to output frame. Cannot process image.");
             ROS_WARN(err.what());
             return;
         }
 
-        auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
-        auto num_tags = stag->detectMarkers(cv_ptr->image);
-
-        // using zero distortion for now partly because ar track alvar does this too
-        // adding in distortion causes weird behavior.
+        auto num_tags = stag.detectMarkers(cv_ptr->image);
 
         ar_track_alvar_msgs::AlvarMarkers markers_message;
 
         if (num_tags > 0) {
-            auto individual_marker_messages = get_transforms_for_individual_markers(stag->markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+            auto individual_marker_messages = get_transforms_for_individual_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
             markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
 
-            auto bundle_marker_messages = get_transforms_for_bundled_markers(stag->markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+            auto bundle_marker_messages = get_transforms_for_bundled_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
         }
 
         markers_message.header.stamp = ros::Time::now();
-        markers_message.header.seq = frame_number++;
+        markers_message.header.seq = image_message->header.seq;
         markers_message.header.frame_id = output_frame_id;
         marker_message_publisher.publish(markers_message);
-        std::cout << "End frame " << ros::Time::now() << std::endl;
     }
 
 
@@ -287,7 +288,6 @@ public:
         image_transport::ImageTransport _image_transport(private_node_handle);
 
         std::string camera_image_topic, camera_info_topic;
-        int tag_id_type;
 
         private_node_handle.getParam("camera_image_topic", camera_image_topic);
         private_node_handle.getParam("camera_info_topic", camera_info_topic);
@@ -300,9 +300,14 @@ public:
         parse_marker_sizes(private_node_handle);
         parse_marker_bundles(private_node_handle);
 
-        for (int subscriber_index = 0; subscriber_index < image_subscribers.size(); ++subscriber_index) {
-            image_subscribers[subscriber_index] = _image_transport.subscribe(camera_image_topic, 10, &StagNodelet::image_callback, this);
-        }
+        ros::SubscribeOptions opts;
+        this_ptr = boost::shared_ptr<void>(static_cast<void*>(this));
+        boost::function<void (const boost::shared_ptr<const sensor_msgs::Image>& )> f2( boost::bind( &StagNodelet::image_callback, this, _1 ) );
+        opts = opts.template create<sensor_msgs::Image>(camera_image_topic, 10, f2, this_ptr, NULL);
+        opts.allow_concurrent_callbacks = true;
+        opts.transport_hints = ros::TransportHints();
+
+        image_subscriber = private_node_handle.subscribe(opts);
 
         camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 10, &StagNodelet::camera_info_callback, this);
 
@@ -311,8 +316,6 @@ public:
 
         transform_broadcaster = new tf::TransformBroadcaster();
         transform_listener = new tf::TransformListener();
-
-        stag = new Stag(tag_id_type, 7, false);
     }
 }; // class stag_ros
 
