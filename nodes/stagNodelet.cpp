@@ -206,10 +206,8 @@ public:
 
 
     std::vector<ar_track_alvar_msgs::AlvarMarker> get_transforms_for_bundled_markers(const std::vector<Marker>& markers, tf::StampedTransform camera_to_output_frame, std::string image_frame_id, ros::Time image_time_stamp) {
-    }
-
-    void process_image(cv_bridge::CvImage image, std::string image_frame_id, ros::Time image_time_stamp, int seq) {
-
+        std::vector<ar_track_alvar_msgs::AlvarMarker> result;
+        return result;
     }
 
     void image_callback(const sensor_msgs::ImageConstPtr& image_message) {
@@ -249,7 +247,6 @@ public:
         markers_message.header.frame_id = output_frame_id;
         marker_message_publisher.publish(markers_message);
     }
-
 
     void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
         camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
