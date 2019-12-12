@@ -250,6 +250,8 @@ public:
 
     void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
         camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
+
+        distortion_coefficients = (cv::Mat1d(5, 1) << camera_info_msg->D[0], camera_info_msg->D[1], camera_info_msg->D[2], camera_info_msg->D[3], camera_info_msg->D[4]);
         have_camera_info = true;
     }
 
@@ -279,7 +281,6 @@ public:
 
     void onInit() {
         distortion_coefficients = cv::Mat(5, 1, CV_32FC1);
-        distortion_coefficients = 0.0;
 
         ros::NodeHandle& private_node_handle = getMTPrivateNodeHandle();
         image_transport::ImageTransport _image_transport(private_node_handle);
