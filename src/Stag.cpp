@@ -19,19 +19,15 @@ Stag::Stag(int libraryHD, int inErrorCorrection, bool inKeepLogs)
 
 size_t Stag::detectMarkers(const cv::Mat& inImage)
 {
-    std::cout << " G1 " << std::endl;
     markers.clear();
 
-    std::cout << " G2 " << std::endl;
 	image = inImage;
 	quadDetector.detectQuads(image, &edInterface);
 
-    std::cout << " G3 " << std::endl;
 	vector<Quad> quads = quadDetector.getQuads();
 
     std::vector<int> decodedMarkersIds;
 
-    std::cout << " G4 " << std::endl;
 	for (int indQuad = 0; indQuad < quads.size(); indQuad++)
 	{
 		quads[indQuad].estimateHomography();
@@ -51,7 +47,6 @@ size_t Stag::detectMarkers(const cv::Mat& inImage)
 			falseCandidates.push_back(quads[indQuad]);
 	}
 
-    std::cout << " G5 " << std::endl;
 	for (int indMarker = 0; indMarker < markers.size(); indMarker++) {
 		poseRefiner.refineMarkerPose(&edInterface, markers[indMarker]);
     }
