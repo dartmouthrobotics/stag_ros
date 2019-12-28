@@ -217,7 +217,7 @@ public:
         auto image_frame_id = image_message->header.frame_id;
         auto image_time_stamp = image_message->header.stamp;
 
-        auto cv_ptr = cv_bridge::toCvCopy(image_message, sensor_msgs::image_encodings::MONO8);
+        auto cv_ptr = cv_bridge::toCvShare(image_message, sensor_msgs::image_encodings::MONO8);
 
         Stag stag(tag_id_type, 7, false);
 
@@ -283,6 +283,7 @@ public:
         distortion_coefficients = cv::Mat(5, 1, CV_32FC1);
 
         ros::NodeHandle& private_node_handle = getMTPrivateNodeHandle();
+        //ros::NodeHandle& private_node_handle = getPrivateNodeHandle();
         image_transport::ImageTransport _image_transport(private_node_handle);
 
         std::string camera_image_topic, camera_info_topic;
