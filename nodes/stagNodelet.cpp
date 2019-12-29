@@ -318,7 +318,12 @@ public:
 
     void parse_marker_bundles(ros::NodeHandle& private_node_handle) {
         XmlRpc::XmlRpcValue marker_bundles_yaml;
-        private_node_handle.getParam("marker_bundles", marker_bundles_yaml);
+        bool param_exists = private_node_handle.getParam("marker_bundles", marker_bundles_yaml);
+
+	if (!param_exists) {
+            ROS_INFO("No marker bundle provided. Aborting marker bundle parsing.");
+	    return;
+	}
 
         for (size_t bundle_index = 0; bundle_index < marker_bundles_yaml.size(); ++bundle_index) {
             MarkerBundle bundle_parsed;
@@ -351,6 +356,7 @@ public:
 
 
     void onInit() {
+	ROS_INFO("Initializing stag_ros");
         distortion_coefficients = cv::Mat(5, 1, CV_32FC1);
 
         ros::NodeHandle& private_node_handle = getMTPrivateNodeHandle();
@@ -367,7 +373,10 @@ public:
         private_node_handle.getParam("output_frame_id", output_frame_id);
         private_node_handle.getParam("marker_message_topic", marker_message_topic);
 
+	ROS_INFO("Parsing individual marker sizes");
         parse_marker_sizes(private_node_handle);
+
+	ROS_INFO("Parsing marker bundles");
         parse_marker_bundles(private_node_handle);
 
         ros::SubscribeOptions opts;
@@ -386,7 +395,8 @@ public:
         transform_broadcaster = new tf::TransformBroadcaster();
         transform_listener = new tf::TransformListener();
 
-        std::string image_frame_id = "/v4l_frame";
+	std::string image_frame_id;
+	private_node_handle.getParam("image_frame_id", image_frame_id);
 
         ROS_INFO("Waiting for transformation from image to output frame...");
         transform_listener->waitForTransform(output_frame_id, image_frame_id, ros::Time(0), ros::Duration(30.0));
