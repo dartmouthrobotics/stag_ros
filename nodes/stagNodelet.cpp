@@ -14,7 +14,16 @@
 #include "Stag.h"
 #include "Marker.h"
 
+// handling marker bundles...
+// for each marker. If the marker is not in a bundle, process as is now
+
 namespace stag_ros {
+
+class MarkerBundle {
+public:
+    int broadcasted_id;
+    std::map<int, std::vector<cv::Point3f>> corner_world_locations;
+};
 
 class StagNodelet : public nodelet::Nodelet { 
 public:
@@ -23,8 +32,11 @@ public:
     tf::TransformBroadcaster* transform_broadcaster;
     tf::TransformListener* transform_listener;
 
+    std::vector<MarkerBundle> marker_bundles;
+
     // need to publish the alvar markers message.
 
+    tf::StampedTransform camera_to_output_frame;
     cv::Mat camera_matrix;
     cv::Mat distortion_coefficients;
     bool have_camera_info;
@@ -57,8 +69,6 @@ public:
             return default_marker_size;
         }
     }
-    // say we have many bundles
-    // we have a list of detected markers, and we have a set of bundles which are mappings between marker ids and corners.
 
 
     void get_individual_marker_pose(const Marker& marker, cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation) {
@@ -92,12 +102,6 @@ public:
             resultTranslation
         );
     }
-
-    // add publishing of all of the tags to a message
-    // add support for rviz
-
-    // add support for transforming to an output frame
-    // add support for marker bundles.
 
     tf::StampedTransform cv_to_tf_transform(cv::Mat translation, cv::Mat rotation, std::string image_frame_id, std::string marker_frame_id, ros::Time stamp) {
         tf::Transform marker_transform;
@@ -156,6 +160,12 @@ public:
 
 
     bool marker_is_in_bundle(int id) {
+        for (auto& bundle : marker_bundles) {
+            if (bundle.corner_world_locations.count(id) > 0) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -176,28 +186,7 @@ public:
             double marker_size_meters = get_marker_size(detected_marker.id);
             get_individual_marker_pose(detected_marker, camera_matrix, distortion_coefficients, marker_size_meters, rotation, translation);
 
-            auto camera_to_marker_transform = cv_to_tf_transform(
-                translation,
-                rotation,
-                image_frame_id,
-                marker_frame_id,
-                image_time_stamp 
-            );
-
-            auto output_to_marker_transform = camera_to_output_frame * camera_to_marker_transform;
-            auto marker_pose_output_frame = tf_to_pose_stamped(
-                output_to_marker_transform,
-                output_frame_id, 
-                image_time_stamp
-            );
-
-            transform_broadcaster->sendTransform(camera_to_marker_transform);
-
-            ar_track_alvar_msgs::AlvarMarker serialized_marker;
-
-            serialized_marker.id = detected_marker.id;
-            serialized_marker.pose = marker_pose_output_frame;
-            serialized_marker.header.stamp = ros::Time::now();
+            auto serialized_marker = construct_alvar_marker_and_publish_transform(detected_marker.id, rotation, translation, image_frame_id, image_time_stamp, marker_frame_id);
             alvar_markers.push_back(serialized_marker);
         }
 
@@ -205,8 +194,69 @@ public:
     }
 
 
+    ar_track_alvar_msgs::AlvarMarker construct_alvar_marker_and_publish_transform(int id, cv::Mat rotation, cv::Mat translation, std::string image_frame_id, ros::Time image_time_stamp, std::string marker_frame_id) {
+        auto camera_to_marker_transform = cv_to_tf_transform(
+            translation,
+            rotation,
+            image_frame_id,
+            marker_frame_id,
+            image_time_stamp 
+        );
+
+        auto output_to_marker_transform = camera_to_output_frame * camera_to_marker_transform;
+
+        transform_broadcaster->sendTransform(camera_to_marker_transform);
+
+        auto marker_pose_output_frame = tf_to_pose_stamped(
+            output_to_marker_transform,
+            output_frame_id, 
+            image_time_stamp
+        );
+
+        ar_track_alvar_msgs::AlvarMarker serialized_marker;
+
+        serialized_marker.id = id;
+        serialized_marker.pose = marker_pose_output_frame;
+        serialized_marker.header.stamp = ros::Time::now();
+
+        return serialized_marker;
+    }
+
+
     std::vector<ar_track_alvar_msgs::AlvarMarker> get_transforms_for_bundled_markers(const std::vector<Marker>& markers, tf::StampedTransform camera_to_output_frame, std::string image_frame_id, ros::Time image_time_stamp) {
         std::vector<ar_track_alvar_msgs::AlvarMarker> result;
+
+        for (auto& bundle : marker_bundles) {
+            std::vector<cv::Point2f> image_points;
+            std::vector<cv::Point3f> world_points;
+
+            for (auto& visible_marker : markers) {
+                if (bundle.corner_world_locations.count(visible_marker.id) > 0) { 
+                    image_points.insert(image_points.end(), visible_marker.corners.begin(), visible_marker.corners.end());
+                    world_points.insert(world_points.end(), bundle.corner_world_locations[visible_marker.id].begin(), bundle.corner_world_locations[visible_marker.id].end());
+                }
+            }
+
+            if (!image_points.empty()) {
+                cv::Mat rotation_rodrigues;
+                cv::Mat translation;
+
+                cv::solvePnP(
+                    world_points,
+                    image_points,
+                    camera_matrix,
+                    distortion_coefficients,
+                    rotation_rodrigues,
+                    translation
+                );
+
+                std::string marker_frame_id = marker_frame_prefix + std::to_string(bundle.broadcasted_id);
+                auto marker_message = construct_alvar_marker_and_publish_transform(bundle.broadcasted_id, rotation_rodrigues, translation, image_frame_id, image_time_stamp, marker_frame_id);
+
+                result.push_back(marker_message);
+            }
+        }
+
         return result;
     }
 
@@ -221,16 +271,6 @@ public:
 
         Stag stag(tag_id_type, 7, false);
 
-        tf::StampedTransform camera_to_output_frame;
-
-        try {
-            transform_listener->lookupTransform(output_frame_id, image_frame_id, ros::Time(0), camera_to_output_frame);
-        } catch(tf::LookupException err) {
-            ROS_WARN("Could get transformation from camera to output frame. Cannot process image.");
-            ROS_WARN(err.what());
-            return;
-        }
-
         auto num_tags = stag.detectMarkers(cv_ptr->image);
 
         ar_track_alvar_msgs::AlvarMarkers markers_message;
@@ -239,12 +279,14 @@ public:
             auto individual_marker_messages = get_transforms_for_individual_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
             markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
 
-            auto bundle_marker_messages = get_transforms_for_bundled_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+            auto bundled_marker_messages = get_transforms_for_bundled_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+            markers_message.markers.insert(markers_message.markers.end(), bundled_marker_messages.begin(), bundled_marker_messages.end());
         }
 
         markers_message.header.stamp = ros::Time::now();
         markers_message.header.seq = image_message->header.seq;
         markers_message.header.frame_id = output_frame_id;
+
         marker_message_publisher.publish(markers_message);
     }
 
@@ -275,7 +317,36 @@ public:
 
 
     void parse_marker_bundles(ros::NodeHandle& private_node_handle) {
+        XmlRpc::XmlRpcValue marker_bundles_yaml;
+        private_node_handle.getParam("marker_bundles", marker_bundles_yaml);
 
+        for (size_t bundle_index = 0; bundle_index < marker_bundles_yaml.size(); ++bundle_index) {
+            MarkerBundle bundle_parsed;
+            auto bundle = marker_bundles_yaml[bundle_index];
+
+            bundle_parsed.broadcasted_id = bundle["markers"][0]["id"];
+
+            for (size_t marker_index = 0; marker_index < bundle["markers"].size(); ++marker_index) {
+                auto marker_yaml = bundle["markers"][marker_index];
+
+                int marker_id = marker_yaml["id"];
+                bundle_parsed.corner_world_locations[marker_id] = std::vector<cv::Point3f>();
+
+                for (size_t corner_index = 0; corner_index < marker_yaml["corners"].size(); ++corner_index) {
+                    auto corner_yaml = marker_yaml["corners"][corner_index];
+
+                    bundle_parsed.corner_world_locations[marker_id].push_back(
+                        cv::Point3f(
+                            static_cast<double>(corner_yaml[0]),
+                            static_cast<double>(corner_yaml[1]),
+                            static_cast<double>(corner_yaml[2])
+                        )
+                    );
+
+                    marker_bundles.push_back(bundle_parsed);
+                }
+            }
+        }
     }
 
 
@@ -305,7 +376,6 @@ public:
         opts.allow_concurrent_callbacks = true;
         opts.transport_hints = ros::TransportHints();
 
-        image_subscriber = private_node_handle.subscribe(opts);
 
         camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 10, &StagNodelet::camera_info_callback, this);
 
@@ -314,6 +384,25 @@ public:
 
         transform_broadcaster = new tf::TransformBroadcaster();
         transform_listener = new tf::TransformListener();
+
+        std::string image_frame_id = "/v4l_frame";
+
+        ROS_INFO("Waiting for transformation from image to output frame...");
+        transform_listener->waitForTransform(output_frame_id, image_frame_id, ros::Time(0), ros::Duration(30.0));
+        ROS_INFO("Finished waiting for image to output frame transform");
+
+        try {
+            transform_listener->lookupTransform(output_frame_id, image_frame_id, ros::Time(0), camera_to_output_frame);
+        } catch(tf::LookupException err) {
+            ROS_ERROR("Could get transformation from camera to output frame. Cannot process image.");
+            ROS_ERROR(err.what());
+
+            throw err;
+        }
+
+        parse_marker_bundles(private_node_handle);
+
+        image_subscriber = private_node_handle.subscribe(opts);
     }
 }; // class stag_ros
 
