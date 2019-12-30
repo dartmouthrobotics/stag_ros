@@ -2,6 +2,7 @@
 
 #include <ros/ros.h>
 #include <image_transport/image_transport.h>
+#include <mutex>
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <tf/LinearMath/Matrix3x3.h>
@@ -53,6 +54,9 @@ public:
     ros::Subscriber image_subscriber; 
     ros::Subscriber camera_info_subscriber;
 
+    std::mutex transform_broadcaster_mutex;
+    std::mutex marker_message_mutex;
+
     StagNodelet() : 
         transform_broadcaster(NULL), 
         transform_listener(NULL),
@@ -101,6 +105,14 @@ public:
             resultRotation,
             resultTranslation
         );
+        //cv::solvePnP(
+        //    objectPoints,
+        //    imagePoints,
+        //    cameraMatrix,
+        //    cv::Mat(),
+        //    resultRotation,
+        //    resultTranslation
+        //);
     }
 
     tf::StampedTransform cv_to_tf_transform(cv::Mat translation, cv::Mat rotation, std::string image_frame_id, std::string marker_frame_id, ros::Time stamp) {
@@ -205,7 +217,9 @@ public:
 
         auto output_to_marker_transform = camera_to_output_frame * camera_to_marker_transform;
 
+	transform_broadcaster_mutex.lock();
         transform_broadcaster->sendTransform(camera_to_marker_transform);
+	transform_broadcaster_mutex.unlock();
 
         auto marker_pose_output_frame = tf_to_pose_stamped(
             output_to_marker_transform,
@@ -271,6 +285,9 @@ public:
 
         Stag stag(tag_id_type, 7, false);
 
+	//cv::Mat undistorted_image;
+	//cv::undistort(cv_ptr->image, undistorted_image, camera_matrix, distortion_coefficients);
+
         auto num_tags = stag.detectMarkers(cv_ptr->image);
 
         ar_track_alvar_msgs::AlvarMarkers markers_message;
@@ -287,7 +304,9 @@ public:
         markers_message.header.seq = image_message->header.seq;
         markers_message.header.frame_id = output_frame_id;
 
+	marker_message_mutex.lock();
         marker_message_publisher.publish(markers_message);
+	marker_message_mutex.unlock();
     }
 
     void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
