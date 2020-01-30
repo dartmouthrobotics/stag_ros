@@ -18,6 +18,8 @@
 // handling marker bundles...
 // for each marker. If the marker is not in a bundle, process as is now
 
+bool use_marker_bundles(true);
+
 namespace stag_ros {
 
 class MarkerBundle {
@@ -105,14 +107,6 @@ public:
             resultRotation,
             resultTranslation
         );
-        //cv::solvePnP(
-        //    objectPoints,
-        //    imagePoints,
-        //    cameraMatrix,
-        //    cv::Mat(),
-        //    resultRotation,
-        //    resultTranslation
-        //);
     }
 
     tf::StampedTransform cv_to_tf_transform(cv::Mat translation, cv::Mat rotation, std::string image_frame_id, std::string marker_frame_id, ros::Time stamp) {
@@ -186,7 +180,7 @@ public:
         std::vector<ar_track_alvar_msgs::AlvarMarker> alvar_markers;
 
         for (auto& detected_marker : markers) {
-            if (marker_is_in_bundle(detected_marker.id)) {
+            if (marker_is_in_bundle(detected_marker.id) && use_marker_bundles) {
                 continue;
             }
 
@@ -247,27 +241,45 @@ public:
             for (auto& visible_marker : markers) {
                 if (bundle.corner_world_locations.count(visible_marker.id) > 0) { 
                     image_points.insert(image_points.end(), visible_marker.corners.begin(), visible_marker.corners.end());
-                    world_points.insert(world_points.end(), bundle.corner_world_locations[visible_marker.id].begin(), bundle.corner_world_locations[visible_marker.id].end());
+                    //world_points.insert(world_points.end(), bundle.corner_world_locations[visible_marker.id].begin(), bundle.corner_world_locations[visible_marker.id].end());
+                    world_points.push_back(bundle.corner_world_locations[visible_marker.id][3]);
+                    world_points.push_back(bundle.corner_world_locations[visible_marker.id][0]);
+                    world_points.push_back(bundle.corner_world_locations[visible_marker.id][2]);
+                    world_points.push_back(bundle.corner_world_locations[visible_marker.id][1]);
                 }
             }
 
             if (!image_points.empty()) {
-                cv::Mat rotation_rodrigues;
-                cv::Mat translation;
+                try {
+                    cv::Mat rotation_rodrigues;
+                    cv::Mat translation;
 
-                cv::solvePnP(
-                    world_points,
-                    image_points,
-                    camera_matrix,
-                    distortion_coefficients,
-                    rotation_rodrigues,
-                    translation
-                );
+                    //std::cout << "Solving pnp problem with world points: " << std::endl;
+                    //for (auto & pt : world_points) {
+                    //    std::cout << "    " << pt << std::endl;
+                    //}
 
-                std::string marker_frame_id = marker_frame_prefix + std::to_string(bundle.broadcasted_id);
-                auto marker_message = construct_alvar_marker_and_publish_transform(bundle.broadcasted_id, rotation_rodrigues, translation, image_frame_id, image_time_stamp, marker_frame_id);
+                    //std::cout << "and image points: " << std::endl;
+                    //for (auto& pt : image_points) {
+                    //    std::cout << "    " << pt << std::endl;
+                    //}
 
-                result.push_back(marker_message);
+                    cv::solvePnP(
+                        world_points,
+                        image_points,
+                        camera_matrix,
+                        distortion_coefficients,
+                        rotation_rodrigues,
+                        translation
+                    );
+
+                    std::string marker_frame_id = marker_frame_prefix + std::to_string(bundle.broadcasted_id);
+                    auto marker_message = construct_alvar_marker_and_publish_transform(bundle.broadcasted_id, rotation_rodrigues, translation, image_frame_id, image_time_stamp, marker_frame_id);
+
+                    result.push_back(marker_message);
+                } catch (cv::Exception error) {
+                    ROS_WARN_STREAM("Failed to get pose for bundled marker. Skipping bundle id " << bundle.broadcasted_id);
+                }
             }
         }
 
@@ -285,9 +297,6 @@ public:
 
         Stag stag(tag_id_type, 7, false);
 
-	//cv::Mat undistorted_image;
-	//cv::undistort(cv_ptr->image, undistorted_image, camera_matrix, distortion_coefficients);
-
         auto num_tags = stag.detectMarkers(cv_ptr->image);
 
         ar_track_alvar_msgs::AlvarMarkers markers_message;
@@ -296,8 +305,10 @@ public:
             auto individual_marker_messages = get_transforms_for_individual_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
             markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
 
-            auto bundled_marker_messages = get_transforms_for_bundled_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
-            markers_message.markers.insert(markers_message.markers.end(), bundled_marker_messages.begin(), bundled_marker_messages.end());
+            if (use_marker_bundles) {
+               auto bundled_marker_messages = get_transforms_for_bundled_markers(stag.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+               markers_message.markers.insert(markers_message.markers.end(), bundled_marker_messages.begin(), bundled_marker_messages.end());
+            }
         }
 
         markers_message.header.stamp = ros::Time::now();
@@ -310,10 +321,12 @@ public:
     }
 
     void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
-        camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
+        if (!have_camera_info) {
+            camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
 
-        distortion_coefficients = (cv::Mat1d(5, 1) << camera_info_msg->D[0], camera_info_msg->D[1], camera_info_msg->D[2], camera_info_msg->D[3], camera_info_msg->D[4]);
-        have_camera_info = true;
+            distortion_coefficients = (cv::Mat1d(5, 1) << camera_info_msg->D[0], camera_info_msg->D[1], camera_info_msg->D[2], camera_info_msg->D[3], camera_info_msg->D[4]);
+            have_camera_info = true;
+        }
     }
 
 
@@ -366,11 +379,15 @@ public:
                             static_cast<double>(corner_yaml[2])
                         )
                     );
-
-                    marker_bundles.push_back(bundle_parsed);
                 }
             }
+
+            if (!bundle_parsed.corner_world_locations.empty()) {
+                marker_bundles.push_back(bundle_parsed);
+            }
         }
+
+        ROS_INFO_STREAM("stag_ros parsed " << marker_bundles.size() << " marker bundles ");
     }
 
 
@@ -414,6 +431,8 @@ public:
         transform_broadcaster = new tf::TransformBroadcaster();
         transform_listener = new tf::TransformListener();
 
+        private_node_handle.getParam("use_marker_bundles", use_marker_bundles);
+
 	std::string image_frame_id;
 	private_node_handle.getParam("image_frame_id", image_frame_id);
 
@@ -429,8 +448,6 @@ public:
 
             throw err;
         }
-
-        parse_marker_bundles(private_node_handle);
 
         image_subscriber = private_node_handle.subscribe(opts);
     }
