@@ -11,6 +11,7 @@
 #include <ar_track_alvar_msgs/AlvarMarkers.h>
 #include <pluginlib/class_list_macros.h>
 #include <nodelet/nodelet.h>
+#include <boost/enable_shared_from_this.hpp>
 
 #include "Stag.h"
 #include "Marker.h"
@@ -52,6 +53,7 @@ public:
     int frame_number;
     int tag_id_type;
     boost::shared_ptr<void> this_ptr;
+    int _unused;
 
     ros::Subscriber image_subscriber; 
     ros::Subscriber camera_info_subscriber;
@@ -385,7 +387,7 @@ public:
         if (!param_exists) {
             ROS_INFO("No marker bundle provided. Aborting marker bundle parsing.");
             return;
-	    }
+        }
 
         for (size_t bundle_index = 0; bundle_index < marker_bundles_yaml.size(); ++bundle_index) {
             MarkerBundle bundle_parsed;
@@ -411,10 +413,7 @@ public:
                     );
                 }
             }
-
-            if (!bundle_parsed.corner_world_locations.empty()) {
-                marker_bundles.push_back(bundle_parsed);
-            }
+            marker_bundles.push_back(bundle_parsed);
         }
 
         ROS_INFO_STREAM("stag_ros parsed " << marker_bundles.size() << " marker bundles ");
@@ -440,17 +439,16 @@ public:
 
         ROS_INFO("Parsing individual marker sizes");
         parse_marker_sizes(private_node_handle);
-    
+
         ROS_INFO("Parsing marker bundles");
         parse_marker_bundles(private_node_handle);
 
         ros::SubscribeOptions opts;
-        this_ptr = boost::shared_ptr<void>(static_cast<void*>(this));
+        this_ptr = boost::shared_ptr<void>(static_cast<void*>(&(this->_unused)));
         boost::function<void (const boost::shared_ptr<const sensor_msgs::Image>& )> f2( boost::bind( &StagNodelet::image_callback, this, _1 ) );
         opts = opts.template create<sensor_msgs::Image>(camera_image_topic, 10, f2, this_ptr, NULL);
         opts.allow_concurrent_callbacks = true;
         opts.transport_hints = ros::TransportHints();
-
 
         camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 10, &StagNodelet::camera_info_callback, this);
 
@@ -477,9 +475,22 @@ public:
             throw err;
         }
 
+        parse_marker_bundles(private_node_handle);
+        ROS_INFO_STREAM("Marker bundles:");
+        for (auto& bundle : marker_bundles) {
+            ROS_INFO_STREAM("    " << bundle.broadcasted_id << " with " << bundle.corner_world_locations.size() << " tags.");
+        }
+        ROS_INFO_STREAM("End marker bundles");
+
+        ROS_INFO_STREAM("Got marker sizes");
+        for (auto& key_value : marker_size_by_id) {
+            ROS_INFO_STREAM("marker id " << key_value.first << " size " << key_value.second);
+        }
+        ROS_INFO_STREAM("End marker sizes");
+
         image_subscriber = private_node_handle.subscribe(opts);
     }
 }; // class stag_ros
 
-PLUGINLIB_EXPORT_CLASS(stag_ros::StagNodelet, nodelet::Nodelet)
+PLUGINLIB_EXPORT_CLASS(stag_ros::StagNodelet, nodelet::Nodelet);
 } // namespace stag_ros
