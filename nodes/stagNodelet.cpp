@@ -58,6 +58,7 @@ public:
 
     std::mutex transform_broadcaster_mutex;
     std::mutex marker_message_mutex;
+    std::mutex cam_info_mutex;
 
     StagNodelet() : 
         transform_broadcaster(NULL), 
@@ -99,14 +100,24 @@ public:
         cv::Mat rotationRodrigues;
         cv::Mat translation;
 
+        cam_info_mutex.lock();
+        //cv::solvePnP(
+        //    objectPoints,
+        //    imagePoints,
+        //    cameraMatrix,
+        //    distortionCoefficients,
+        //    resultRotation,
+        //    resultTranslation
+        //);
         cv::solvePnP(
             objectPoints,
             imagePoints,
             cameraMatrix,
-            distortionCoefficients,
+            cv::Mat(),
             resultRotation,
             resultTranslation
         );
+        cam_info_mutex.unlock();
     }
 
     tf::StampedTransform cv_to_tf_transform(cv::Mat translation, cv::Mat rotation, std::string image_frame_id, std::string marker_frame_id, ros::Time stamp) {
@@ -211,9 +222,9 @@ public:
 
         auto output_to_marker_transform = camera_to_output_frame * camera_to_marker_transform;
 
-	transform_broadcaster_mutex.lock();
+        transform_broadcaster_mutex.lock();
         transform_broadcaster->sendTransform(camera_to_marker_transform);
-	transform_broadcaster_mutex.unlock();
+        transform_broadcaster_mutex.unlock();
 
         auto marker_pose_output_frame = tf_to_pose_stamped(
             output_to_marker_transform,
@@ -264,14 +275,24 @@ public:
                     //    std::cout << "    " << pt << std::endl;
                     //}
 
+                    cam_info_mutex.lock();
+                    //cv::solvePnP(
+                    //    world_points,
+                    //    image_points,
+                    //    camera_matrix,
+                    //    distortion_coefficients,
+                    //    rotation_rodrigues,
+                    //    translation
+                    //);
                     cv::solvePnP(
                         world_points,
                         image_points,
                         camera_matrix,
-                        distortion_coefficients,
+                        cv::Mat(),
                         rotation_rodrigues,
                         translation
                     );
+                    cam_info_mutex.unlock();
 
                     std::string marker_frame_id = marker_frame_prefix + std::to_string(bundle.broadcasted_id);
                     auto marker_message = construct_alvar_marker_and_publish_transform(bundle.broadcasted_id, rotation_rodrigues, translation, image_frame_id, image_time_stamp, marker_frame_id);
@@ -290,6 +311,7 @@ public:
         if (!have_camera_info) {
             return;
         }
+
         auto image_frame_id = image_message->header.frame_id;
         auto image_time_stamp = image_message->header.stamp;
 
@@ -297,7 +319,13 @@ public:
 
         Stag stag(tag_id_type, 7, false);
 
-        auto num_tags = stag.detectMarkers(cv_ptr->image);
+        cv::Mat undistorted_image;
+
+        cam_info_mutex.lock();
+        cv::undistort(cv_ptr->image, undistorted_image, camera_matrix, distortion_coefficients);
+        cam_info_mutex.unlock();
+
+        auto num_tags = stag.detectMarkers(undistorted_image);
 
         ar_track_alvar_msgs::AlvarMarkers markers_message;
 
@@ -315,16 +343,18 @@ public:
         markers_message.header.seq = image_message->header.seq;
         markers_message.header.frame_id = output_frame_id;
 
-	marker_message_mutex.lock();
+        marker_message_mutex.lock();
         marker_message_publisher.publish(markers_message);
-	marker_message_mutex.unlock();
+        marker_message_mutex.unlock();
     }
 
     void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
         if (!have_camera_info) {
+            cam_info_mutex.lock();
             camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
 
             distortion_coefficients = (cv::Mat1d(5, 1) << camera_info_msg->D[0], camera_info_msg->D[1], camera_info_msg->D[2], camera_info_msg->D[3], camera_info_msg->D[4]);
+            cam_info_mutex.unlock();
             have_camera_info = true;
         }
     }
@@ -352,10 +382,10 @@ public:
         XmlRpc::XmlRpcValue marker_bundles_yaml;
         bool param_exists = private_node_handle.getParam("marker_bundles", marker_bundles_yaml);
 
-	if (!param_exists) {
+        if (!param_exists) {
             ROS_INFO("No marker bundle provided. Aborting marker bundle parsing.");
-	    return;
-	}
+            return;
+	    }
 
         for (size_t bundle_index = 0; bundle_index < marker_bundles_yaml.size(); ++bundle_index) {
             MarkerBundle bundle_parsed;
@@ -392,11 +422,10 @@ public:
 
 
     void onInit() {
-	ROS_INFO("Initializing stag_ros");
+        ROS_INFO("Initializing stag_ros");
         distortion_coefficients = cv::Mat(5, 1, CV_32FC1);
 
         ros::NodeHandle& private_node_handle = getMTPrivateNodeHandle();
-        //ros::NodeHandle& private_node_handle = getPrivateNodeHandle();
         image_transport::ImageTransport _image_transport(private_node_handle);
 
         std::string camera_image_topic, camera_info_topic;
@@ -409,10 +438,10 @@ public:
         private_node_handle.getParam("output_frame_id", output_frame_id);
         private_node_handle.getParam("marker_message_topic", marker_message_topic);
 
-	ROS_INFO("Parsing individual marker sizes");
+        ROS_INFO("Parsing individual marker sizes");
         parse_marker_sizes(private_node_handle);
-
-	ROS_INFO("Parsing marker bundles");
+    
+        ROS_INFO("Parsing marker bundles");
         parse_marker_bundles(private_node_handle);
 
         ros::SubscribeOptions opts;
@@ -432,9 +461,8 @@ public:
         transform_listener = new tf::TransformListener();
 
         private_node_handle.getParam("use_marker_bundles", use_marker_bundles);
-
-	std::string image_frame_id;
-	private_node_handle.getParam("image_frame_id", image_frame_id);
+        std::string image_frame_id;
+        private_node_handle.getParam("image_frame_id", image_frame_id);
 
         ROS_INFO("Waiting for transformation from image to output frame...");
         transform_listener->waitForTransform(output_frame_id, image_frame_id, ros::Time(0), ros::Duration(30.0));
