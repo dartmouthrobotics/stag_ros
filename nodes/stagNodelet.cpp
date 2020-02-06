@@ -225,7 +225,7 @@ public:
 
         serialized_marker.id = id;
         serialized_marker.pose = marker_pose_output_frame;
-        serialized_marker.header.stamp = ros::Time::now();
+        serialized_marker.header.stamp = image_time_stamp;
 
         return serialized_marker;
     }
@@ -291,7 +291,7 @@ public:
             markers_message.markers.insert(markers_message.markers.end(), bundled_marker_messages.begin(), bundled_marker_messages.end());
         }
 
-        markers_message.header.stamp = ros::Time::now();
+        markers_message.header.stamp = image_time_stamp;
         markers_message.header.seq = image_message->header.seq;
         markers_message.header.frame_id = output_frame_id;
 
@@ -393,14 +393,14 @@ public:
         ros::SubscribeOptions opts;
         this_ptr = boost::shared_ptr<void>(static_cast<void*>(&(this->_unused)));
         boost::function<void (const boost::shared_ptr<const sensor_msgs::Image>& )> f2( boost::bind( &StagNodelet::image_callback, this, _1 ) );
-        opts = opts.template create<sensor_msgs::Image>(camera_image_topic, 10, f2, this_ptr, NULL);
+        opts = opts.template create<sensor_msgs::Image>(camera_image_topic, 1, f2, this_ptr, NULL);
         opts.allow_concurrent_callbacks = true;
         opts.transport_hints = ros::TransportHints();
 
-        camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 10, &StagNodelet::camera_info_callback, this);
+        camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 1, &StagNodelet::camera_info_callback, this);
 
         // node handle where alvar_markers messages are published.
-        marker_message_publisher = private_node_handle.advertise<ar_track_alvar_msgs::AlvarMarkers>(marker_message_topic, 100);
+        marker_message_publisher = private_node_handle.advertise<ar_track_alvar_msgs::AlvarMarkers>(marker_message_topic, 1);
 
         transform_broadcaster = new tf::TransformBroadcaster();
         transform_listener = new tf::TransformListener();
