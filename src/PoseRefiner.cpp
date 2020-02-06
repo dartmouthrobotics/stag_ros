@@ -136,7 +136,7 @@ bool PoseRefiner::refineMarkerPose(EDInterface* edInterface, Marker& marker)
 	marker.C.at<double>(1, 2) = marker.C.at<double>(2, 1) = -coeffs[4] / 2;
 	marker.C.at<double>(2, 2) = coeffs[5];
 
-    cv::TermCriteria terminationCriteria(cv::TermCriteria::MAX_ITER+cv::TermCriteria::EPS, 4000, 0.005);
+    cv::TermCriteria terminationCriteria(cv::TermCriteria::MAX_ITER+cv::TermCriteria::EPS, 8000, 0.00001);
 	// refine the pose
 	optEllipse = marker.C;
 	cv::Ptr<cv::DownhillSolver> solver = cv::DownhillSolver::create();
