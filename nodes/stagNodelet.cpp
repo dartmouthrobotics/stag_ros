@@ -62,6 +62,9 @@ public:
     std::mutex marker_message_mutex;
     std::mutex cam_info_mutex;
 
+    cv::Mat undistort_map1;
+    cv::Mat undistort_map2;
+
     StagNodelet() : 
         transform_broadcaster(NULL), 
         transform_listener(NULL),
@@ -103,14 +106,7 @@ public:
         cv::Mat translation;
 
         cam_info_mutex.lock();
-        //cv::solvePnP(
-        //    objectPoints,
-        //    imagePoints,
-        //    cameraMatrix,
-        //    distortionCoefficients,
-        //    resultRotation,
-        //    resultTranslation
-        //);
+
         cv::solvePnP(
             objectPoints,
             imagePoints,
@@ -324,7 +320,7 @@ public:
         cv::Mat undistorted_image;
 
         cam_info_mutex.lock();
-        cv::undistort(cv_ptr->image, undistorted_image, camera_matrix, distortion_coefficients);
+    	cv::remap(cv_ptr->image, undistorted_image, undistort_map1, undistort_map2, cv::INTER_CUBIC);
         cam_info_mutex.unlock();
 
         auto num_tags = stag.detectMarkers(undistorted_image);
@@ -353,11 +349,15 @@ public:
     void camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
         if (!have_camera_info) {
             cam_info_mutex.lock();
+            have_camera_info = true;
             camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
 
             distortion_coefficients = (cv::Mat1d(5, 1) << camera_info_msg->D[0], camera_info_msg->D[1], camera_info_msg->D[2], camera_info_msg->D[3], camera_info_msg->D[4]);
+
+
+            cv::initUndistortRectifyMap(camera_matrix, distortion_coefficients, cv::Mat(), camera_matrix, cv::Size(camera_info_msg->width, camera_info_msg->height), CV_32FC1, undistort_map1, undistort_map2);
+
             cam_info_mutex.unlock();
-            have_camera_info = true;
         }
     }
 
