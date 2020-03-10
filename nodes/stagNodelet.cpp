@@ -441,7 +441,6 @@ public:
         parse_marker_sizes(private_node_handle);
 
         ROS_INFO("Parsing marker bundles");
-        parse_marker_bundles(private_node_handle);
 
         ros::SubscribeOptions opts;
         this_ptr = boost::shared_ptr<void>(static_cast<void*>(&(this->_unused)));
