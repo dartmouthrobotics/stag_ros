@@ -1,0 +1,3 @@
+[submodule "modules/stag"]
+	path = modules/stag
+	url = https://github.com/dartmouthrobotics/stag.git
