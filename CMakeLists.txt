@@ -38,7 +38,7 @@ include_directories(
 )
 
 
-add_library(stag_ros nodes/stagNodelet.cpp)
+add_library(stag_ros nodes/StagNodelet.cpp)
 target_link_libraries(stag_ros
     ${catkin_LIBRARIES}
     stag_lib 
