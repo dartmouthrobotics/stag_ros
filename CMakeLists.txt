@@ -9,29 +9,34 @@ find_package(catkin REQUIRED COMPONENTS
   tf
   image_transport
   cv_bridge
-  ar_track_alvar_msgs
   nodelet
+)
+
+add_message_files(
+  FILES
+  StagMarkers.msg
+  StagMarker.msg
+)
+
+generate_messages(
+   DEPENDENCIES
+   std_msgs 
+   geometry_msgs
 )
 
 catkin_package(
     LIBRARIES stag_ros
-    CATKIN_DEPENDS std_msgs roscpp image_transport image_transport nodelet
+    CATKIN_DEPENDS std_msgs roscpp image_transport image_transport nodelet std_msgs message_generation geometry_msgs
 )
 
+add_subdirectory(modules/stag)
+
 include_directories(
-  "src/"
+  "modules/stag/src"
   ${catkin_INCLUDE_DIRS}
-  "/opt/ros/melodic/include"
   ${OpenCV_INCLUDE_DIRS}
 )
 
-FILE(GLOB stag_srcs src/*.cpp)
-FILE(GLOB ED_srcs src/ED/*.cpp)
-
-LIST(APPEND stag_srcs ${ED_srcs})
-
-add_library(stag_lib ${stag_srcs})
-target_link_libraries(stag_lib ${OpenCV_LIBS})
 
 add_library(stag_ros nodes/stagNodelet.cpp)
 target_link_libraries(stag_ros

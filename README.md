@@ -1,3 +1,23 @@
+# ROS wrapper for STag
+
+For example launch file see `launch/example.launch`
+
+Currently this package only runs as a nodelet. It is able to process camera frames in parallel by changing the `num_worker_threads` parameter to your nodelet manager.
+
+parameters:
+
+* `marker_sizes_by_id`: a list of xmlrpc struct objects (json or yaml), each element with a value `size` which denotes the side length of a marker in meters and `id` whic is the id of the marker. Marker ids not in this list will be assumed to be the default marker size.
+* `marker_bundles`: a list of marker bundles. Each marker bundle has a broadcasted id and a list of every member marker id and the corners of the marker in the bundles frame. If this parameter is missing, no marker bundles will be used. If it is present, all markers in a bundle will be grouped and used to solve an instance of the SolvePnP problem.
+* `camera_info_topic`: The topic from which camera info will be read.
+* `camera_image_topic`: The topic from which images will be read.
+* `tag_id_type`: describes the class of id used by the STag library. See that code for more info. It determines the number of available ids.
+* `default_marker_size`: Individual (those not in a bundle) markers which are not in the list `marker_sizes_by_id` are assigned this side length in meters.
+* `output_frame_id`: `StagMarkers` messages are published with a `PoseStamped` for each marker. `output_frame_id` determines the frame the pose is defined in. There must be a transform between the camera's coordinate frame and this frame in the tf tree for this to work.
+* `marker_message_topic`: the topic that marker messages are published to.
+* `marker_frame_prefix`: When the marker coordinate frame is added into the `tf` tree, each marker will be given a name: "marker\_frame\_prefix" + \<marker\_id\>. For example, if `marker_frame_prefix` is `ar_marker_` and marker `1` is decodes, the marker will be `ar_marker_1` in the tf tree.
+
+For an example launch file and example parameter files, see the `launch` and `param` directories
+
 # STag: A Stable Fiducial Marker System
 
 Code used in the following paper:
