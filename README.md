@@ -1,5 +1,15 @@
 # ROS wrapper for STag
 
+## Building the code
+
+To build the code, download it into the `src` directory of your catkin workspace. After downloading, you need to get the `STag` library by downloading the submodules. To do get the Stag submodule you need to initialize the git submodules.
+```
+cd stag_ros
+git submodule update --init --recursive
+```
+
+## Usage
+
 For example launch file see `launch/example.launch`
 
 Currently this package only runs as a nodelet. It is able to process camera frames in parallel by changing the `num_worker_threads` parameter to your nodelet manager.
