@@ -765,7 +765,7 @@ EDLines *DetectLinesByEDPF(EdgeMap*& map, unsigned char *srcImg, int width, int 
   timer.Start();
 
   // Detect edges by edge drawing parameter free (EDPF)
-  map = DetectEdgesByEDPF(srcImg, width, height);   // Detect edges by EDPF
+  map = DetectEdgesByEDPF(srcImg, width, height, 1.0);   // Detect edges by EDPF
 
   // Burak - find edge loops
   bool* validSegments = new bool[map->noSegments];

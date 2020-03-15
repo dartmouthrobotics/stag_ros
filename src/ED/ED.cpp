@@ -119,7 +119,7 @@ EdgeMap *DetectEdgesByEDV(unsigned char *srcImg, int width, int height, Gradient
 /// 
 EdgeMap *DetectEdgesByEDPF(unsigned char *srcImg, int width, int height, double smoothingSigma){
   // Check parameters for sanity
-  if (smoothingSigma < 1.0) smoothingSigma = 1.0;
+  //if (smoothingSigma < 1.0) smoothingSigma = 1.0;
 
   // Allocate space for temporary storage
   unsigned char *smoothImg = new unsigned char[width*height];
@@ -145,9 +145,9 @@ EdgeMap *DetectEdgesByEDPF(unsigned char *srcImg, int width, int height, double 
 #if 0
   ValidateEdgeSegments(map, srcImg);
 #elif 1
-  smoothingSigma /= 2.5;
-  SmoothImage(srcImg, smoothImg, width, height, smoothingSigma);
-  ValidateEdgeSegments(map, smoothImg, 2.25);  // with Prewitt
+  //smoothingSigma /= 2.5;
+  //SmoothImage(srcImg, smoothImg, width, height, smoothingSigma);
+  //ValidateEdgeSegments(map, smoothImg, 2.25);  // with Prewitt
 //  ValidateEdgeSegments2(map, smoothImg, 2);   // with LSD
 #endif
 

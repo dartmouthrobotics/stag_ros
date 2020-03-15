@@ -318,10 +318,16 @@ public:
         Stag stag(tag_id_type, 7, false);
 
         cv::Mat undistorted_image;
+        cv::Mat clahed_image;
 
         cam_info_mutex.lock();
     	cv::remap(cv_ptr->image, undistorted_image, undistort_map1, undistort_map2, cv::INTER_CUBIC);
         cam_info_mutex.unlock();
+
+        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
+        clahe->setClipLimit(4);
+        cv::Mat dst;
+        clahe->apply(undistorted_image, clahed_image);
 
         auto num_tags = stag.detectMarkers(undistorted_image);
 
