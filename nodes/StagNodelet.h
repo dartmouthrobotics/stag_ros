@@ -13,6 +13,7 @@
 #include <tf/transform_broadcaster.h>
 #include <tf/transform_listener.h>
 #include <stag_ros/StagMarker.h>
+#include <stag_ros/StagMarkers.h>
 #include <image_transport/image_transport.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <pluginlib/class_list_macros.h>
@@ -33,6 +34,7 @@ public:
     tf::TransformListener* transform_listener;
 
     std::vector<MarkerBundle> marker_bundles;
+    std::vector<stag::Marker> previously_detected_markers;
 
     tf::StampedTransform camera_to_output_frame;
     cv::Mat camera_matrix;
@@ -40,6 +42,8 @@ public:
     bool have_camera_info;
     bool use_marker_bundles;
     int highest_frame;
+    int marker_track_width_offset;
+    int marker_track_height_offset;
     std::string marker_frame_prefix;
     std::string output_frame_id;
     std::string marker_message_topic;
@@ -48,7 +52,15 @@ public:
     int frame_number;
     int tag_id_type;
     boost::shared_ptr<void> this_ptr;
+    std::unique_ptr<image_transport::ImageTransport> image_transport_ptr;
     int _unused;
+    bool save_debug_stream;
+    bool track_markers;
+    std::string debug_stream_directory;
+
+    bool publish_debug_images;
+    image_transport::Publisher undistorted_image_publisher;
+    image_transport::Publisher optimized_corner_image_publisher;
 
     ros::Subscriber image_subscriber; 
     ros::Subscriber camera_info_subscriber;
@@ -60,6 +72,8 @@ public:
     cv::Mat undistort_map1;
     cv::Mat undistort_map2;
 
+    std::map<size_t, std::vector<cv::Point2d>> previous_image_points;
+
     StagNodelet() : 
         transform_broadcaster(NULL), 
         transform_listener(NULL),
@@ -70,13 +84,23 @@ public:
 
     double get_marker_size(size_t marker_id);
 
-    void get_individual_marker_pose(const stag::Marker& marker, cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation);
+    float get_individual_marker_pose(const stag::Marker& marker, cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation);
+
+    void preprocess_image(const cv::Mat& raw_image, cv::Mat& output_image);
+
+    void do_publish_debug_images(ros::Time image_time_stamp, cv::Mat& undistorted_image, stag_ros::StagMarkers& markers_message, std::string output_frame_id, size_t seq, std::map<int, std::vector<cv::Point2d>> unrefined_corners);
 
     tf::StampedTransform cv_to_tf_transform(cv::Mat translation, cv::Mat rotation, std::string image_frame_id, std::string marker_frame_id, ros::Time stamp);
+
+    float get_reprojection_error(std::vector<cv::Point3f> object_points, std::vector<cv::Point2d> image_points, cv::Mat rotation_rodrigues, cv::Mat translation, cv::Mat camera_matrix);
 
     geometry_msgs::PoseStamped tf_to_pose_stamped(tf::Transform transform, std::string pose_frame_id, ros::Time stamp);
 
     bool marker_is_in_bundle(int id);
+
+    cv::Mat downsample_image(const cv::Mat& image);
+
+    std::vector<cv::Point2d> get_previous_image_points(size_t id);
 
     std::vector<stag_ros::StagMarker> get_transforms_for_individual_markers(const std::vector<stag::Marker>& markers, tf::StampedTransform camera_to_output_frame, std::string image_frame_id, ros::Time image_time_stamp);
 
@@ -92,8 +116,13 @@ public:
 
     void parse_marker_bundles(ros::NodeHandle& private_node_handle);
 
-    void onInit();
+    std::map<size_t, std::vector<cv::Point2d>> refine_corners(std::vector<stag::Marker>& markers, cv::Mat& image);
 
+    std::vector<stag::Marker> detect_markers(const cv::Mat& image, stag::Stag& stag_instance);
+
+    bool should_track_markers();
+
+    void onInit();
 }; // class stag_ros
 
 } // namespace stag_ros

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(stag_ros)
 
-find_package(OpenCV REQUIRED)
+find_package(OpenCV 3.4.9 REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
@@ -49,7 +49,7 @@ if(catkin_EXPORTED_LIBRARIES)
   add_dependencies(stag_ros ${catkin_EXPORTED_LIBRARIES})
 endif()
 
-install(TARGETS stag_ros
+install(TARGETS stag_ros stag_lib
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

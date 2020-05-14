@@ -6,6 +6,7 @@
 #include <mutex>
 #include <tf/LinearMath/Matrix3x3.h>
 #include <stag_ros/StagMarkers.h>
+#include <opencv2/core/core.hpp>
 
 namespace stag_ros {
 
@@ -18,9 +19,43 @@ double StagNodelet::get_marker_size(size_t marker_id) {
 }
 
 
-void StagNodelet::get_individual_marker_pose(const stag::Marker& marker, cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation) {
+float StagNodelet::get_reprojection_error(std::vector<cv::Point3f> object_points, std::vector<cv::Point2d> image_points, cv::Mat rotation_rodrigues, cv::Mat translation, cv::Mat camera_matrix) {
+    std::vector<cv::Point2f> reprojected_points;
+
+    std::vector<cv::Point2f> image_points_float;
+    for (auto& pt : image_points) {
+        image_points_float.push_back(pt);
+    }
+
+    cv::projectPoints(object_points, rotation_rodrigues, translation, camera_matrix, cv::Mat(), reprojected_points);
+
+    float total_error = 0;
+    for (size_t point_index = 0; point_index < image_points.size(); ++point_index) {
+        auto real_image_point = image_points_float[point_index];
+        auto predicted_image_point = reprojected_points[point_index];
+        auto diff = real_image_point - predicted_image_point;
+
+        total_error += cv::sqrt(diff.x*diff.x + diff.y*diff.y);
+    }
+
+    return total_error;
+}
+
+
+std::vector<cv::Point2d> StagNodelet::get_previous_image_points(size_t id) {
+    if (previous_image_points.count(id) == 0) {
+        std::vector<cv::Point2d> result;
+        return result;
+    }
+
+    return previous_image_points[id];
+}
+
+
+float StagNodelet::get_individual_marker_pose(const stag::Marker& marker, cv::Mat cameraMatrix, cv::Mat distortionCoefficients, float sideLengthMeters, cv::Mat& resultRotation, cv::Mat& resultTranslation) {
     // returns the result of solving the PnP problem
     std::vector<cv::Point3f> objectPoints;
+
     objectPoints.push_back((cv::Point3f(0.5, 0.5, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
 
     // order reversed to get a more normal coordinate orientation
@@ -29,7 +64,7 @@ void StagNodelet::get_individual_marker_pose(const stag::Marker& marker, cv::Mat
     objectPoints.push_back((cv::Point3f(1.0, 0.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
     objectPoints.push_back((cv::Point3f(0.0, 0.0, 0.0) - cv::Point3f(0.5, 0.5, 0.0)) * sideLengthMeters);
 
-    std::vector<cv::Point2f> imagePoints;
+    std::vector<cv::Point2d> imagePoints;
 
     imagePoints.push_back(marker.center);
     imagePoints.push_back(marker.corners[0]);
@@ -41,7 +76,6 @@ void StagNodelet::get_individual_marker_pose(const stag::Marker& marker, cv::Mat
     cv::Mat translation;
 
     cam_info_mutex.lock();
-
     cv::solvePnP(
         objectPoints,
         imagePoints,
@@ -50,7 +84,11 @@ void StagNodelet::get_individual_marker_pose(const stag::Marker& marker, cv::Mat
         resultRotation,
         resultTranslation
     );
+
+    auto reprojection_error = get_reprojection_error(objectPoints, imagePoints, resultRotation, resultTranslation, cameraMatrix);
     cam_info_mutex.unlock();
+
+    return reprojection_error;
 }
 
 tf::StampedTransform StagNodelet::cv_to_tf_transform(cv::Mat translation, cv::Mat rotation, std::string image_frame_id, std::string marker_frame_id, ros::Time stamp) {
@@ -133,9 +171,11 @@ std::vector<stag_ros::StagMarker> StagNodelet::get_transforms_for_individual_mar
         std::string marker_frame_id = marker_frame_prefix + std::to_string(detected_marker.id);
 
         double marker_size_meters = get_marker_size(detected_marker.id);
-        get_individual_marker_pose(detected_marker, camera_matrix, distortion_coefficients, marker_size_meters, rotation, translation);
+        float reprojection_error = get_individual_marker_pose(detected_marker, camera_matrix, distortion_coefficients, marker_size_meters, rotation, translation);
 
         auto serialized_marker = construct_alvar_marker_and_publish_transform(detected_marker.id, rotation, translation, image_frame_id, image_time_stamp, marker_frame_id, detected_marker.corners);
+
+        serialized_marker.reprojection_error = reprojection_error;
         alvar_markers.push_back(serialized_marker);
     }
 
@@ -190,64 +230,201 @@ std::vector<stag_ros::StagMarker> StagNodelet::get_transforms_for_bundled_marker
     for (auto& bundle : marker_bundles) {
         std::vector<cv::Point2d> image_points;
         std::vector<cv::Point3f> world_points;
+        std::array<size_t, 4> bundle_corner_indices {3, 0, 2, 1};
+
+        cv::Mat rotation_rodrigues;
+        cv::Mat translation;
 
         for (auto& visible_marker : markers) {
             if (bundle.corner_world_locations.count(visible_marker.id) > 0) { 
-                image_points.insert(image_points.end(), visible_marker.corners.begin(), visible_marker.corners.end());
-                //world_points.insert(world_points.end(), bundle.corner_world_locations[visible_marker.id].begin(), bundle.corner_world_locations[visible_marker.id].end());
-                world_points.push_back(bundle.corner_world_locations[visible_marker.id][3]);
-                world_points.push_back(bundle.corner_world_locations[visible_marker.id][0]);
-                world_points.push_back(bundle.corner_world_locations[visible_marker.id][2]);
-                world_points.push_back(bundle.corner_world_locations[visible_marker.id][1]);
+                for (size_t corner_number = 0; corner_number < 4; ++corner_number) {
+                    image_points.push_back(visible_marker.corners[corner_number]);
+                    world_points.push_back(bundle.corner_world_locations[visible_marker.id][bundle_corner_indices[corner_number]]);
+                }
             }
         }
 
         if (!image_points.empty()) {
             try {
-                cv::Mat rotation_rodrigues;
-                cv::Mat translation;
-
-                //std::cout << "Solving pnp problem with world points: " << std::endl;
-                //for (auto & pt : world_points) {
-                //    std::cout << "    " << pt << std::endl;
-                //}
-
-                //std::cout << "and image points: " << std::endl;
-                //for (auto& pt : image_points) {
-                //    std::cout << "    " << pt << std::endl;
-                //}
-
                 cam_info_mutex.lock();
-                //cv::solvePnP(
-                //    world_points,
-                //    image_points,
-                //    camera_matrix,
-                //    distortion_coefficients,
-                //    rotation_rodrigues,
-                //    translation
-                //);
                 cv::solvePnP(
                     world_points,
                     image_points,
                     camera_matrix,
                     cv::Mat(),
                     rotation_rodrigues,
-                    translation
+                    translation,
+                    false
                 );
+
+                auto reprojection_error = get_reprojection_error(world_points, image_points, rotation_rodrigues, translation, camera_matrix);
                 cam_info_mutex.unlock();
 
                 std::string marker_frame_id = marker_frame_prefix + std::to_string(bundle.broadcasted_id);
                 auto marker_message = construct_alvar_marker_and_publish_transform(bundle.broadcasted_id, rotation_rodrigues, translation, image_frame_id, image_time_stamp, marker_frame_id, image_points);
+                marker_message.reprojection_error = reprojection_error;
 
                 result.push_back(marker_message);
             } catch (cv::Exception error) {
                 ROS_WARN_STREAM("Failed to get pose for bundled marker. Skipping bundle id " << bundle.broadcasted_id);
+                cam_info_mutex.unlock();
             }
         }
     }
 
     return result;
 }
+
+
+void StagNodelet::preprocess_image(const cv::Mat& raw_image, cv::Mat& output_image) {
+    cam_info_mutex.lock();
+    cv::remap(raw_image, output_image, undistort_map1, undistort_map2, cv::INTER_CUBIC);
+    cam_info_mutex.unlock();
+}
+
+
+void StagNodelet::do_publish_debug_images(ros::Time image_time_stamp, cv::Mat& undistorted_image, stag_ros::StagMarkers& markers_message, std::string output_frame_id, size_t seq, std::map<int, std::vector<cv::Point2d>> unrefined_corners) {
+    sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", undistorted_image).toImageMsg();
+    msg->header.stamp = image_time_stamp;
+    msg->header.seq = seq;
+    msg->header.frame_id = output_frame_id;
+    undistorted_image_publisher.publish(msg);
+
+    cv::Mat corner_marked_image;
+
+    cv::cvtColor(undistorted_image, corner_marked_image, cv::COLOR_GRAY2BGR);
+
+    for (auto& marker : markers_message.markers) {
+        for (auto& corner : marker.corners) {
+            cv::Vec3b& intensity = corner_marked_image.at<cv::Vec3b>(corner.y, corner.x);
+
+            intensity.val[0] = 0;
+            intensity.val[1] = 0;
+            intensity.val[2] = 255;
+        }
+    }
+
+    sensor_msgs::ImagePtr corner_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", corner_marked_image).toImageMsg();
+
+    corner_msg->header.stamp = image_time_stamp;
+    corner_msg->header.seq = seq;
+    corner_msg->header.frame_id = output_frame_id;
+    optimized_corner_image_publisher.publish(corner_msg);
+
+    seq = frame_number++;
+
+    if (save_debug_stream) {
+        std::string corner_file_name = debug_stream_directory + "/corner_locations_" + std::to_string(seq) + ".txt";
+        std::string unrefined_corner_file_name = debug_stream_directory + "/unrefined_corner_locations_" + std::to_string(seq) + ".txt";
+
+        std::ofstream ofs(corner_file_name);
+        std::ofstream unrefined_stream(unrefined_corner_file_name);
+        for (auto& marker : markers_message.markers) {
+            ofs << marker.id << std::endl;
+            unrefined_stream << marker.id << std::endl;
+            for (auto& corner : marker.corners) {
+                ofs << corner.x << " " << corner.y << std::endl;
+            }
+
+            for (auto& corner : unrefined_corners[marker.id]) {
+                unrefined_stream << corner.x << " " << corner.y << std::endl; 
+            }
+        }
+        ofs.close();
+
+        std::string image_file_name = debug_stream_directory + "/preprocessed_" + std::to_string(seq) + ".pgm";
+        cv::imwrite(image_file_name, undistorted_image);
+    }
+}
+
+
+std::map<size_t, std::vector<cv::Point2d>> StagNodelet::refine_corners(std::vector<stag::Marker>& markers, cv::Mat& image) {
+    std::map<size_t, std::vector<cv::Point2d>> result;
+
+    for (auto& marker : markers) {
+        cv::TermCriteria terminationCriteria(cv::TermCriteria::MAX_ITER+cv::TermCriteria::EPS, 100000, 0.00001);
+
+        cv::Mat corners_mat(marker.corners);
+        corners_mat.convertTo(corners_mat, CV_32FC1);
+
+        cv::cornerSubPix(image, corners_mat, cv::Size(2, 2), cv::Size(-1, -1), terminationCriteria);
+
+        for (size_t i = 0; i < corners_mat.rows; ++i) {
+            marker.corners[i] = cv::Point2d(corners_mat.at<float>(i, 0), corners_mat.at<float>(i, 1));
+        }
+    }
+
+    return result;
+}
+
+
+bool StagNodelet::should_track_markers() {
+    return previously_detected_markers.size() > 0 && track_markers;
+}
+
+int clamp_to_range(int to_clamp, int minimum, int maximum) {
+    return std::min(
+        std::max(
+            to_clamp,
+            minimum
+        ),
+        maximum
+    );
+}
+
+std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag::Stag& stag_instance) {
+
+    if (should_track_markers()) {
+        std::vector<stag::Marker> markers;
+
+        for (auto& marker : previously_detected_markers) {
+            std::vector<cv::Point2f> corners_float;
+            cv::Mat(marker.corners).convertTo(corners_float, cv::Mat(corners_float).type());
+            cv::Rect marker_bounding_box = cv::boundingRect(corners_float);
+
+            marker_bounding_box.x = clamp_to_range(marker_bounding_box.x - marker_track_width_offset, 0, image.cols);
+            marker_bounding_box.y = clamp_to_range(marker_bounding_box.y - marker_track_height_offset, 0, image.rows);
+
+            if (marker_bounding_box.x + marker_bounding_box.width + marker_track_width_offset * 2 > image.cols) {
+                marker_bounding_box.width = image.cols - marker_bounding_box.x;
+            } else {
+                marker_bounding_box.width = marker_bounding_box.width + marker_track_width_offset * 2;
+            }
+
+            if (marker_bounding_box.y + marker_bounding_box.height + marker_track_height_offset * 2 > image.rows) {
+                marker_bounding_box.height = image.rows - marker_bounding_box.y;
+            } else {
+                marker_bounding_box.height = marker_bounding_box.height + marker_track_height_offset * 2;
+            }
+
+            cv::Mat sub_image(marker_bounding_box.height, marker_bounding_box.width, image.type());
+            image(marker_bounding_box).copyTo(sub_image);
+
+            stag_instance.markers.clear();
+            size_t num_markers = stag_instance.detectMarkers(sub_image);
+
+            cv::Point2d corner_offset(marker_bounding_box.x, marker_bounding_box.y);
+
+            for (auto& detected_marker : stag_instance.markers) {
+                for (size_t corner_index = 0; corner_index < 4; ++ corner_index) {
+                    detected_marker.corners[corner_index] = corner_offset + detected_marker.corners[corner_index];
+                }
+                detected_marker.center += corner_offset;
+            }
+
+            markers.insert(markers.end(), stag_instance.markers.begin(), stag_instance.markers.end());
+        }
+
+        previously_detected_markers = markers;
+        return markers;
+    }
+
+    stag_instance.detectMarkers(image);
+    previously_detected_markers = stag_instance.markers;
+
+    return stag_instance.markers;
+}
+
 
 void StagNodelet::image_callback(const sensor_msgs::ImageConstPtr& image_message) {
     if (!have_camera_info) {
@@ -262,30 +439,48 @@ void StagNodelet::image_callback(const sensor_msgs::ImageConstPtr& image_message
 
     stag::Stag stag_instance(tag_id_type, 7, false);
 
-    cv::Mat undistorted_image;
-    cv::Mat clahed_image;
+    cv::Mat preprocessed_image;
+    preprocess_image(cv_ptr->image, preprocessed_image);
 
-    cam_info_mutex.lock();
-    cv::remap(cv_ptr->image, undistorted_image, undistort_map1, undistort_map2, cv::INTER_CUBIC);
-    cam_info_mutex.unlock();
+    auto markers = detect_markers(preprocessed_image, stag_instance);
+    auto num_tags = markers.size();
 
-    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
-    clahe->setClipLimit(4);
-    cv::Mat dst;
-    clahe->apply(undistorted_image, clahed_image);
+    std::sort(
+        markers.begin(),
+        markers.end(),
+        [](const stag::Marker& a, const stag::Marker& b){
+            return a.id < b.id;
+        }
+    );
 
-    auto num_tags = stag_instance.detectMarkers(undistorted_image);
+    std::map<int, std::vector<cv::Point2d>> unrefined_corners;
 
+    for (auto& marker : markers) {
+        unrefined_corners[marker.id] = marker.corners;
+    }
+
+    refine_corners(markers, preprocessed_image);
     stag_ros::StagMarkers markers_message;
 
     if (num_tags > 0) {
-        auto individual_marker_messages = get_transforms_for_individual_markers(stag_instance.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+        auto individual_marker_messages = get_transforms_for_individual_markers(markers, camera_to_output_frame, image_frame_id, image_time_stamp);
         markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
 
         if (use_marker_bundles) {
-           auto bundled_marker_messages = get_transforms_for_bundled_markers(stag_instance.markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+           auto bundled_marker_messages = get_transforms_for_bundled_markers(markers, camera_to_output_frame, image_frame_id, image_time_stamp);
            markers_message.markers.insert(markers_message.markers.end(), bundled_marker_messages.begin(), bundled_marker_messages.end());
         }
+    }
+
+    if (publish_debug_images) {
+        do_publish_debug_images(
+            image_time_stamp,
+            preprocessed_image,
+            markers_message,
+            output_frame_id,
+            image_message->header.seq,
+            unrefined_corners
+        );
     }
 
     markers_message.header.stamp = image_time_stamp;
@@ -375,6 +570,8 @@ void StagNodelet::onInit() {
     ROS_INFO("Initializing stag_ros");
     distortion_coefficients = cv::Mat(5, 1, CV_32FC1);
     use_marker_bundles = true;
+    publish_debug_images = false;
+    track_markers = false;
 
     ros::NodeHandle& private_node_handle = getMTPrivateNodeHandle();
     image_transport::ImageTransport _image_transport(private_node_handle);
@@ -388,6 +585,20 @@ void StagNodelet::onInit() {
     private_node_handle.getParam("default_marker_size", default_marker_size);
     private_node_handle.getParam("output_frame_id", output_frame_id);
     private_node_handle.getParam("marker_message_topic", marker_message_topic);
+    private_node_handle.getParam("publish_debug_images", publish_debug_images);
+    private_node_handle.getParam("use_marker_bundles", use_marker_bundles);
+    private_node_handle.getParam("save_debug_stream", save_debug_stream);
+    private_node_handle.getParam("debug_stream_directory", debug_stream_directory);
+    private_node_handle.getParam("track_markers", track_markers);
+    private_node_handle.getParam("marker_track_height_offset", marker_track_height_offset);
+    private_node_handle.getParam("marker_track_width_offset", marker_track_width_offset);
+
+    if (save_debug_stream) {
+        ROS_INFO_STREAM("Saving debug stream to directory " << debug_stream_directory);
+    }
+
+    std::string image_frame_id;
+    private_node_handle.getParam("image_frame_id", image_frame_id);
 
     ROS_INFO("Parsing individual marker sizes");
     parse_marker_sizes(private_node_handle);
@@ -403,15 +614,10 @@ void StagNodelet::onInit() {
 
     camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 1, &StagNodelet::camera_info_callback, this);
 
-    // node handle where alvar_markers messages are published.
     marker_message_publisher = private_node_handle.advertise<stag_ros::StagMarkers>(marker_message_topic, 1);
 
     transform_broadcaster = new tf::TransformBroadcaster();
     transform_listener = new tf::TransformListener();
-
-    private_node_handle.getParam("use_marker_bundles", use_marker_bundles);
-    std::string image_frame_id;
-    private_node_handle.getParam("image_frame_id", image_frame_id);
 
     ROS_INFO("Waiting for transformation from image to output frame...");
     transform_listener->waitForTransform(output_frame_id, image_frame_id, ros::Time(0), ros::Duration(30.0));
@@ -438,6 +644,22 @@ void StagNodelet::onInit() {
         ROS_INFO_STREAM("marker id " << key_value.first << " size " << key_value.second);
     }
     ROS_INFO_STREAM("End marker sizes");
+
+    if (publish_debug_images) {
+        image_transport_ptr = std::unique_ptr<image_transport::ImageTransport>(
+            new image_transport::ImageTransport(private_node_handle)
+        );
+        
+        undistorted_image_publisher = image_transport_ptr->advertise(
+            "debug/undistorted_image",
+            1
+        );
+
+        optimized_corner_image_publisher = image_transport_ptr->advertise(
+            "debug/optimized_corners",
+            1
+        );
+    }
 
     image_subscriber = private_node_handle.subscribe(opts);
 }

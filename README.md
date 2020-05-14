@@ -15,6 +15,7 @@ parameters:
 * `output_frame_id`: `StagMarkers` messages are published with a `PoseStamped` for each marker. `output_frame_id` determines the frame the pose is defined in. There must be a transform between the camera's coordinate frame and this frame in the tf tree for this to work.
 * `marker_message_topic`: the topic that marker messages are published to.
 * `marker_frame_prefix`: When the marker coordinate frame is added into the `tf` tree, each marker will be given a name: "marker\_frame\_prefix" + \<marker\_id\>. For example, if `marker_frame_prefix` is `ar_marker_` and marker `1` is decodes, the marker will be `ar_marker_1` in the tf tree.
+* `publish_debug_images`: if true, publishes images which show parts of the detection process overlayed on the image stream
 
 For an example launch file and example parameter files, see the `launch` and `param` directories
 
