@@ -278,7 +278,12 @@ std::vector<stag_ros::StagMarker> StagNodelet::get_transforms_for_bundled_marker
 
 void StagNodelet::preprocess_image(const cv::Mat& raw_image, cv::Mat& output_image) {
     cam_info_mutex.lock();
-    cv::remap(raw_image, output_image, undistort_map1, undistort_map2, cv::INTER_CUBIC);
+    if (have_camera_info) {
+        cv::remap(raw_image, output_image, undistort_map1, undistort_map2, cv::INTER_CUBIC);
+    } else {
+        ROS_WARN_STREAM("Cannot undistort image without camera into. Proceeding without undistortion");
+        output_image = raw_image;
+    }
     cam_info_mutex.unlock();
 }
 
@@ -358,8 +363,8 @@ std::map<size_t, std::vector<cv::Point2d>> StagNodelet::refine_corners(std::vect
 }
 
 
-bool StagNodelet::should_track_markers() {
-    return previously_detected_markers.size() > 0 && track_markers;
+bool StagNodelet::should_track_bundles() {
+    return track_markers;
 }
 
 int clamp_to_range(int to_clamp, int minimum, int maximum) {
@@ -372,65 +377,154 @@ int clamp_to_range(int to_clamp, int minimum, int maximum) {
     );
 }
 
-std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag::Stag& stag_instance) {
 
-    if (should_track_markers()) {
-        std::vector<stag::Marker> markers;
+bool bundle_is_fully_visible(const MarkerBundle& bundle, const std::vector<stag::Marker>& markers) {
+    auto bundle_markers = bundle.marker_ids();
 
-        for (auto& marker : previously_detected_markers) {
-            std::vector<cv::Point2f> corners_float;
-            cv::Mat(marker.corners).convertTo(corners_float, cv::Mat(corners_float).type());
-            cv::Rect marker_bounding_box = cv::boundingRect(corners_float);
-
-            marker_bounding_box.x = clamp_to_range(marker_bounding_box.x - marker_track_width_offset, 0, image.cols);
-            marker_bounding_box.y = clamp_to_range(marker_bounding_box.y - marker_track_height_offset, 0, image.rows);
-
-            if (marker_bounding_box.x + marker_bounding_box.width + marker_track_width_offset * 2 > image.cols) {
-                marker_bounding_box.width = image.cols - marker_bounding_box.x;
-            } else {
-                marker_bounding_box.width = marker_bounding_box.width + marker_track_width_offset * 2;
-            }
-
-            if (marker_bounding_box.y + marker_bounding_box.height + marker_track_height_offset * 2 > image.rows) {
-                marker_bounding_box.height = image.rows - marker_bounding_box.y;
-            } else {
-                marker_bounding_box.height = marker_bounding_box.height + marker_track_height_offset * 2;
-            }
-
-            cv::Mat sub_image(marker_bounding_box.height, marker_bounding_box.width, image.type());
-            image(marker_bounding_box).copyTo(sub_image);
-
-            stag_instance.markers.clear();
-            size_t num_markers = stag_instance.detectMarkers(sub_image);
-
-            cv::Point2d corner_offset(marker_bounding_box.x, marker_bounding_box.y);
-
-            for (auto& detected_marker : stag_instance.markers) {
-                for (size_t corner_index = 0; corner_index < 4; ++ corner_index) {
-                    detected_marker.corners[corner_index] = corner_offset + detected_marker.corners[corner_index];
-                }
-                detected_marker.center += corner_offset;
-            }
-
-            markers.insert(markers.end(), stag_instance.markers.begin(), stag_instance.markers.end());
-        }
-
-        previously_detected_markers = markers;
-        return markers;
+    std::vector<int> detected_marker_ids;
+    for (const auto& marker : markers) {
+        detected_marker_ids.push_back(marker.id);
     }
 
+    for (auto& bundle_marker_id : bundle_markers) {
+        if (std::find(detected_marker_ids.begin(), detected_marker_ids.end(), bundle_marker_id) == detected_marker_ids.end()) {
+            return false;
+        }
+    } 
+
+    return true;
+}
+
+
+void StagNodelet::update_bundle_tracking_information(MarkerBundle& bundle, const std::vector<stag::Marker>& detected_markers, cv::Point2f marker_corner_offset, int image_cols, int image_rows) {
+    bool previously_visible = bundle.fully_visible_in_previous_frame;
+
+    if (!bundle_is_fully_visible(bundle, detected_markers)) {
+        bundle.fully_visible_in_previous_frame = false;
+        return;
+    }
+
+    if (should_track_bundles() && !previously_visible) {
+        ROS_INFO_STREAM("STag tracking started for bundle id " << bundle.broadcasted_id);
+    }
+
+    bundle.fully_visible_in_previous_frame = true;
+
+    std::vector<cv::Point2d> bundle_corners;
+
+    for (auto& detected_marker : detected_markers) {
+        if (bundle.contains_marker_id(detected_marker.id)) {
+            bundle_corners.insert(bundle_corners.end(), detected_marker.corners.begin(), detected_marker.corners.end());
+        }
+    }
+
+    std::vector<cv::Point2f> corners_float;
+    cv::Mat(bundle_corners).convertTo(corners_float, cv::Mat(corners_float).type());
+
+    cv::Rect bundle_bounding_rect = cv::boundingRect(corners_float);
+    bundle_bounding_rect.x += marker_corner_offset.x;
+    bundle_bounding_rect.y += marker_corner_offset.y;
+
+    bundle_bounding_rect.x = clamp_to_range(bundle_bounding_rect.x - marker_track_width_offset, 0, image_cols);
+    bundle_bounding_rect.y = clamp_to_range(bundle_bounding_rect.y - marker_track_height_offset, 0, image_rows);
+
+    if (bundle_bounding_rect.x + bundle_bounding_rect.width + marker_track_width_offset * 2 > image_cols) {
+        bundle_bounding_rect.width = image_cols - bundle_bounding_rect.x;
+    } else {
+        bundle_bounding_rect.width = bundle_bounding_rect.width + marker_track_width_offset * 2;
+    }
+
+    if (bundle_bounding_rect.y + bundle_bounding_rect.height + marker_track_height_offset * 2 > image_rows) {
+        bundle_bounding_rect.height = image_rows - bundle_bounding_rect.y;
+    } else {
+        bundle_bounding_rect.height = bundle_bounding_rect.height + marker_track_height_offset * 2;
+    }
+
+    bundle.previous_frame_image_bounding_box = bundle_bounding_rect;
+}
+
+
+std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag::Stag& stag_instance) {
+    // in each frame, if all four markers were visible, cut the frame down. Otherwise
+    bool tracked_all_bundles = true;
+
+    if (should_track_bundles()) {
+        // flow: for each bundle
+        std::vector<stag::Marker> markers;
+
+        for (auto& bundle : marker_bundles) {
+            bool previously_visible = bundle.fully_visible_in_previous_frame;
+
+            if (bundle.fully_visible_in_previous_frame) {
+                cv::Mat bundle_sub_image(
+                    bundle.previous_frame_image_bounding_box.height,
+                    bundle.previous_frame_image_bounding_box.width,
+                    image.type()
+                );
+
+                image(bundle.previous_frame_image_bounding_box).copyTo(bundle_sub_image);
+
+                cv::Point2f corner_offset;
+                corner_offset.x = bundle.previous_frame_image_bounding_box.x;
+                corner_offset.y = bundle.previous_frame_image_bounding_box.y;
+
+                stag_instance.markers.clear();
+                stag_instance.detectMarkers(bundle_sub_image);
+
+                update_bundle_tracking_information(
+                    bundle,
+                    stag_instance.markers,
+                    corner_offset,
+                    image.rows,
+                    image.cols
+                );
+
+                for (auto& marker : stag_instance.markers) {
+                    for (auto& corner : marker.corners) {
+                        corner.x += corner_offset.x;
+                        corner.y += corner_offset.y;
+                    }
+
+                    markers.push_back(marker);
+                }
+            }
+
+            if (!bundle.fully_visible_in_previous_frame) {
+                tracked_all_bundles = false;
+
+                if (previously_visible) {
+                    ROS_INFO_STREAM("STag tracking stopped for bundle id " << bundle.broadcasted_id);
+                }
+            }
+        }
+
+        if (tracked_all_bundles) {
+            return markers;
+        }
+    }
+
+    // do regular detection
+    stag_instance.markers.clear()
     stag_instance.detectMarkers(image);
-    previously_detected_markers = stag_instance.markers;
+    cv::Point2f image_offset;
+    image_offset.x = 0.0;
+    image_offset.y = 0.0;
+
+    for (auto& bundle : marker_bundles) {
+        update_bundle_tracking_information(
+            bundle,
+            stag_instance.markers,
+            image_offset,
+            image.rows,
+            image.cols
+        );
+    }
 
     return stag_instance.markers;
 }
 
 
 void StagNodelet::image_callback(const sensor_msgs::ImageConstPtr& image_message) {
-    if (!have_camera_info) {
-        ROS_WARN_STREAM("No camera info received yet. Cannot process image frame.");
-        return;
-    }
 
     auto image_frame_id = image_message->header.frame_id;
     auto image_time_stamp = image_message->header.stamp;
@@ -462,16 +556,6 @@ void StagNodelet::image_callback(const sensor_msgs::ImageConstPtr& image_message
     refine_corners(markers, preprocessed_image);
     stag_ros::StagMarkers markers_message;
 
-    if (num_tags > 0) {
-        auto individual_marker_messages = get_transforms_for_individual_markers(markers, camera_to_output_frame, image_frame_id, image_time_stamp);
-        markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
-
-        if (use_marker_bundles) {
-           auto bundled_marker_messages = get_transforms_for_bundled_markers(markers, camera_to_output_frame, image_frame_id, image_time_stamp);
-           markers_message.markers.insert(markers_message.markers.end(), bundled_marker_messages.begin(), bundled_marker_messages.end());
-        }
-    }
-
     if (publish_debug_images) {
         do_publish_debug_images(
             image_time_stamp,
@@ -481,6 +565,21 @@ void StagNodelet::image_callback(const sensor_msgs::ImageConstPtr& image_message
             image_message->header.seq,
             unrefined_corners
         );
+    }
+
+    if (!have_camera_info) {
+        ROS_WARN_STREAM("No camera info received yet. Cannot process image frame.");
+        return;
+    }
+
+    if (num_tags > 0) {
+        auto individual_marker_messages = get_transforms_for_individual_markers(markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+        markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
+
+        if (use_marker_bundles) {
+           auto bundled_marker_messages = get_transforms_for_bundled_markers(markers, camera_to_output_frame, image_frame_id, image_time_stamp);
+           markers_message.markers.insert(markers_message.markers.end(), bundled_marker_messages.begin(), bundled_marker_messages.end());
+        }
     }
 
     markers_message.header.stamp = image_time_stamp;
@@ -572,6 +671,7 @@ void StagNodelet::onInit() {
     use_marker_bundles = true;
     publish_debug_images = false;
     track_markers = false;
+    process_images_in_parallel = false;
 
     ros::NodeHandle& private_node_handle = getMTPrivateNodeHandle();
     image_transport::ImageTransport _image_transport(private_node_handle);
@@ -592,6 +692,7 @@ void StagNodelet::onInit() {
     private_node_handle.getParam("track_markers", track_markers);
     private_node_handle.getParam("marker_track_height_offset", marker_track_height_offset);
     private_node_handle.getParam("marker_track_width_offset", marker_track_width_offset);
+    private_node_handle.getParam("process_images_in_parallel", process_images_in_parallel);
 
     if (save_debug_stream) {
         ROS_INFO_STREAM("Saving debug stream to directory " << debug_stream_directory);
@@ -605,13 +706,6 @@ void StagNodelet::onInit() {
 
     ROS_INFO("Parsing marker bundles");
 
-    ros::SubscribeOptions opts;
-    this_ptr = boost::shared_ptr<void>(static_cast<void*>(&(this->_unused)));
-    boost::function<void (const boost::shared_ptr<const sensor_msgs::Image>& )> f2( boost::bind( &StagNodelet::image_callback, this, _1 ) );
-    opts = opts.template create<sensor_msgs::Image>(camera_image_topic, 1, f2, this_ptr, NULL);
-    opts.allow_concurrent_callbacks = true;
-    opts.transport_hints = ros::TransportHints();
-
     camera_info_subscriber = private_node_handle.subscribe(camera_info_topic, 1, &StagNodelet::camera_info_callback, this);
 
     marker_message_publisher = private_node_handle.advertise<stag_ros::StagMarkers>(marker_message_topic, 1);
@@ -619,9 +713,11 @@ void StagNodelet::onInit() {
     transform_broadcaster = new tf::TransformBroadcaster();
     transform_listener = new tf::TransformListener();
 
-    ROS_INFO("Waiting for transformation from image to output frame...");
-    transform_listener->waitForTransform(output_frame_id, image_frame_id, ros::Time(0), ros::Duration(30.0));
-    ROS_INFO("Finished waiting for image to output frame transform");
+    if (output_frame_id != image_frame_id) {
+        ROS_INFO("Waiting for transformation from image to output frame...");
+        transform_listener->waitForTransform(output_frame_id, image_frame_id, ros::Time(0), ros::Duration(30.0));
+        ROS_INFO("Finished waiting for image to output frame transform");
+    }
 
     try {
         transform_listener->lookupTransform(output_frame_id, image_frame_id, ros::Time(0), camera_to_output_frame);
@@ -645,10 +741,12 @@ void StagNodelet::onInit() {
     }
     ROS_INFO_STREAM("End marker sizes");
 
+    image_transport_ptr = std::unique_ptr<image_transport::ImageTransport>(
+        new image_transport::ImageTransport(private_node_handle)
+    );
+
     if (publish_debug_images) {
-        image_transport_ptr = std::unique_ptr<image_transport::ImageTransport>(
-            new image_transport::ImageTransport(private_node_handle)
-        );
+        ROS_INFO_STREAM("Publishing debug images. Warning! This will reduce performance.");
         
         undistorted_image_publisher = image_transport_ptr->advertise(
             "debug/undistorted_image",
@@ -661,7 +759,22 @@ void StagNodelet::onInit() {
         );
     }
 
-    image_subscriber = private_node_handle.subscribe(opts);
+
+    if (process_images_in_parallel) {
+        ROS_INFO_STREAM("Processing images in parallel! The input topic must be an image_raw topic.");
+        ros::SubscribeOptions opts;
+        this_ptr = boost::shared_ptr<void>(static_cast<void*>(&(this->_unused)));
+        boost::function<void (const boost::shared_ptr<const sensor_msgs::Image>& )> f2( boost::bind( &StagNodelet::image_callback, this, _1 ) );
+        opts = opts.template create<sensor_msgs::Image>(camera_image_topic, 1, f2, this_ptr, NULL);
+        opts.allow_concurrent_callbacks = true;
+        opts.transport_hints = ros::TransportHints();
+        parallel_image_subscriber = private_node_handle.subscribe(opts);
+    } else {
+        ROS_INFO_STREAM("Not processing images in parallel. Set the process_images_in_parallel param to true to process in parallel");
+        single_threaded_image_subscriber = image_transport_ptr->subscribe(camera_image_topic, 1, &StagNodelet::image_callback, this);
+    }
+
+    ROS_INFO_STREAM("Stag ros is ready! Listening for images at " << camera_image_topic);
 }
 
 } // namespace stag_ros

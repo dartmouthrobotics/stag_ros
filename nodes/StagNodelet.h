@@ -24,6 +24,23 @@ class MarkerBundle {
 public:
     int broadcasted_id;
     std::map<int, std::vector<cv::Point3f>> corner_world_locations;
+
+    bool fully_visible_in_previous_frame;
+    cv::Rect previous_frame_image_bounding_box;
+
+    std::vector<int> marker_ids() const {
+        std::vector<int> result;
+
+        for (auto key_value = corner_world_locations.begin(); key_value != corner_world_locations.end(); ++key_value) {
+            result.push_back(key_value->first);
+        }
+
+        return result;
+    }
+
+    bool contains_marker_id(int id) const {
+        return corner_world_locations.count(id) != 0;
+    }
 };
 
 class StagNodelet : public nodelet::Nodelet { 
@@ -34,7 +51,7 @@ public:
     tf::TransformListener* transform_listener;
 
     std::vector<MarkerBundle> marker_bundles;
-    std::vector<stag::Marker> previously_detected_markers;
+    std::vector<MarkerBundle> previously_detected_bundles;
 
     tf::StampedTransform camera_to_output_frame;
     cv::Mat camera_matrix;
@@ -56,14 +73,17 @@ public:
     int _unused;
     bool save_debug_stream;
     bool track_markers;
+    bool process_images_in_parallel;
     std::string debug_stream_directory;
 
     bool publish_debug_images;
     image_transport::Publisher undistorted_image_publisher;
     image_transport::Publisher optimized_corner_image_publisher;
 
-    ros::Subscriber image_subscriber; 
+    ros::Subscriber parallel_image_subscriber; 
     ros::Subscriber camera_info_subscriber;
+
+    image_transport::Subscriber single_threaded_image_subscriber; 
 
     std::mutex transform_broadcaster_mutex;
     std::mutex marker_message_mutex;
@@ -120,9 +140,11 @@ public:
 
     std::vector<stag::Marker> detect_markers(const cv::Mat& image, stag::Stag& stag_instance);
 
-    bool should_track_markers();
+    bool should_track_bundles();
 
     void onInit();
+
+    void update_bundle_tracking_information(MarkerBundle& bundle, const std::vector<stag::Marker>& detected_markers, cv::Point2f marker_corner_offset, int image_cols, int image_rows);
 }; // class stag_ros
 
 } // namespace stag_ros

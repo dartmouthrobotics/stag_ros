@@ -10,6 +10,8 @@ git submodule update --init --recursive
 
 ## Usage
 
+Note that for bundles, the order of corners is: top right, bottom left, bottom right, top left if you think of the bundle being on a flat sheet with the z-axis pointing towards you while you are looking at the sheet and X to your right and Y pointing towards the top of the sheet.
+
 For example launch file see `launch/example.launch`
 
 Currently this package only runs as a nodelet. It is able to process camera frames in parallel by changing the `num_worker_threads` parameter to your nodelet manager.
