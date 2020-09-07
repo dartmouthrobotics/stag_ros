@@ -209,6 +209,7 @@ stag_ros::StagMarker StagNodelet::construct_alvar_marker_and_publish_transform(i
     serialized_marker.id = id;
     serialized_marker.pose = marker_pose_output_frame;
     serialized_marker.header.stamp = image_time_stamp;
+    serialized_marker.header.frame_id = output_frame_id;
     
     for (size_t corner_num = 0; corner_num < corners.size(); ++corner_num) {
         geometry_msgs::Point corner;
@@ -405,7 +406,7 @@ void StagNodelet::update_bundle_tracking_information(MarkerBundle& bundle, const
     }
 
     if (should_track_bundles() && !previously_visible) {
-        ROS_INFO_STREAM("STag tracking started for bundle id " << bundle.broadcasted_id);
+        //ROS_INFO_STREAM("STag tracking started for bundle id " << bundle.broadcasted_id);
     }
 
     bundle.fully_visible_in_previous_frame = true;
@@ -493,7 +494,7 @@ std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag
                 tracked_all_bundles = false;
 
                 if (previously_visible) {
-                    ROS_INFO_STREAM("STag tracking stopped for bundle id " << bundle.broadcasted_id);
+                    //ROS_INFO_STREAM("STag tracking stopped for bundle id " << bundle.broadcasted_id);
                 }
             }
         }
@@ -504,7 +505,7 @@ std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag
     }
 
     // do regular detection
-    stag_instance.markers.clear()
+    stag_instance.markers.clear();
     stag_instance.detectMarkers(image);
     cv::Point2f image_offset;
     image_offset.x = 0.0;
