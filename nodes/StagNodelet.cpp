@@ -406,7 +406,7 @@ void StagNodelet::update_bundle_tracking_information(MarkerBundle& bundle, const
     }
 
     if (should_track_bundles() && !previously_visible) {
-        //ROS_INFO_STREAM("STag tracking started for bundle id " << bundle.broadcasted_id);
+        ROS_INFO_STREAM("STag tracking started for bundle id " << bundle.broadcasted_id);
     }
 
     bundle.fully_visible_in_previous_frame = true;
@@ -422,24 +422,19 @@ void StagNodelet::update_bundle_tracking_information(MarkerBundle& bundle, const
     std::vector<cv::Point2f> corners_float;
     cv::Mat(bundle_corners).convertTo(corners_float, cv::Mat(corners_float).type());
 
+
     cv::Rect bundle_bounding_rect = cv::boundingRect(corners_float);
-    bundle_bounding_rect.x += marker_corner_offset.x;
-    bundle_bounding_rect.y += marker_corner_offset.y;
 
-    bundle_bounding_rect.x = clamp_to_range(bundle_bounding_rect.x - marker_track_width_offset, 0, image_cols);
-    bundle_bounding_rect.y = clamp_to_range(bundle_bounding_rect.y - marker_track_height_offset, 0, image_rows);
+    bundle_bounding_rect.x -= marker_track_width_offset;
+    bundle_bounding_rect.y -= marker_track_height_offset;
+    bundle_bounding_rect.width += marker_track_width_offset * 2;
+    bundle_bounding_rect.height += marker_track_height_offset * 2;
 
-    if (bundle_bounding_rect.x + bundle_bounding_rect.width + marker_track_width_offset * 2 > image_cols) {
-        bundle_bounding_rect.width = image_cols - bundle_bounding_rect.x;
-    } else {
-        bundle_bounding_rect.width = bundle_bounding_rect.width + marker_track_width_offset * 2;
-    }
 
-    if (bundle_bounding_rect.y + bundle_bounding_rect.height + marker_track_height_offset * 2 > image_rows) {
-        bundle_bounding_rect.height = image_rows - bundle_bounding_rect.y;
-    } else {
-        bundle_bounding_rect.height = bundle_bounding_rect.height + marker_track_height_offset * 2;
-    }
+    bundle_bounding_rect.x = clamp_to_range(bundle_bounding_rect.x + marker_corner_offset.x, 0, image_cols);
+    bundle_bounding_rect.y = clamp_to_range(bundle_bounding_rect.y + marker_corner_offset.y, 0, image_rows);
+    bundle_bounding_rect.width = clamp_to_range(bundle_bounding_rect.width, 0, image_cols - bundle_bounding_rect.x);
+    bundle_bounding_rect.height = clamp_to_range(bundle_bounding_rect.height, 0, image_rows - bundle_bounding_rect.y);
 
     bundle.previous_frame_image_bounding_box = bundle_bounding_rect;
 }
@@ -476,8 +471,8 @@ std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag
                     bundle,
                     stag_instance.markers,
                     corner_offset,
-                    image.rows,
-                    image.cols
+                    image.cols,
+                    image.rows
                 );
 
                 for (auto& marker : stag_instance.markers) {
@@ -494,7 +489,7 @@ std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag
                 tracked_all_bundles = false;
 
                 if (previously_visible) {
-                    //ROS_INFO_STREAM("STag tracking stopped for bundle id " << bundle.broadcasted_id);
+                    ROS_INFO_STREAM("STag tracking stopped for bundle id " << bundle.broadcasted_id);
                 }
             }
         }
@@ -516,8 +511,8 @@ std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag
             bundle,
             stag_instance.markers,
             image_offset,
-            image.rows,
-            image.cols
+            image.cols,
+            image.rows
         );
     }
 
@@ -526,6 +521,10 @@ std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag
 
 
 void StagNodelet::image_callback(const sensor_msgs::ImageConstPtr& image_message) {
+    if (!have_camera_info) {
+        ROS_WARN_STREAM("No camera info received yet. Cannot process image frame.");
+        return;
+    }
 
     auto image_frame_id = image_message->header.frame_id;
     auto image_time_stamp = image_message->header.stamp;
@@ -568,11 +567,6 @@ void StagNodelet::image_callback(const sensor_msgs::ImageConstPtr& image_message
         );
     }
 
-    if (!have_camera_info) {
-        ROS_WARN_STREAM("No camera info received yet. Cannot process image frame.");
-        return;
-    }
-
     if (num_tags > 0) {
         auto individual_marker_messages = get_transforms_for_individual_markers(markers, camera_to_output_frame, image_frame_id, image_time_stamp);
         markers_message.markers.insert(markers_message.markers.end(), individual_marker_messages.begin(), individual_marker_messages.end());
@@ -595,7 +589,6 @@ void StagNodelet::image_callback(const sensor_msgs::ImageConstPtr& image_message
 void StagNodelet::camera_info_callback(const sensor_msgs::CameraInfoConstPtr& camera_info_msg) {
     if (!have_camera_info) {
         cam_info_mutex.lock();
-        have_camera_info = true;
         camera_matrix = (cv::Mat1d(3, 3) << camera_info_msg->K[0], camera_info_msg->K[1], camera_info_msg->K[2], camera_info_msg->K[3], camera_info_msg->K[4], camera_info_msg->K[5], camera_info_msg->K[6], camera_info_msg->K[7], camera_info_msg->K[8]);
 
         distortion_coefficients = (cv::Mat1d(5, 1) << camera_info_msg->D[0], camera_info_msg->D[1], camera_info_msg->D[2], camera_info_msg->D[3], camera_info_msg->D[4]);
@@ -603,6 +596,7 @@ void StagNodelet::camera_info_callback(const sensor_msgs::CameraInfoConstPtr& ca
 
         cv::initUndistortRectifyMap(camera_matrix, distortion_coefficients, cv::Mat(), camera_matrix, cv::Size(camera_info_msg->width, camera_info_msg->height), CV_32FC1, undistort_map1, undistort_map2);
 
+        have_camera_info = true;
         cam_info_mutex.unlock();
     }
 }
@@ -659,6 +653,8 @@ void StagNodelet::parse_marker_bundles(ros::NodeHandle& private_node_handle) {
                 );
             }
         }
+
+        bundle_parsed.fully_visible_in_previous_frame = false;
         marker_bundles.push_back(bundle_parsed);
     }
 
