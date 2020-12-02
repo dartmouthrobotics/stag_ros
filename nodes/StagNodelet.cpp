@@ -280,7 +280,7 @@ std::vector<stag_ros::StagMarker> StagNodelet::get_transforms_for_bundled_marker
 void StagNodelet::preprocess_image(const cv::Mat& raw_image, cv::Mat& output_image) {
     cam_info_mutex.lock();
     if (have_camera_info) {
-        cv::remap(raw_image, output_image, undistort_map1, undistort_map2, cv::INTER_CUBIC);
+        cv::remap(raw_image, output_image, undistort_map1, undistort_map2, cv::INTER_LINEAR);
     } else {
         ROS_WARN_STREAM("Cannot undistort image without camera into. Proceeding without undistortion");
         output_image = raw_image;
