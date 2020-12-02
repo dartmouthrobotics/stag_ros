@@ -25,7 +25,7 @@ generate_messages(
 )
 
 catkin_package(
-    LIBRARIES stag_ros
+    LIBRARIES stag_ros stag_lib
     CATKIN_DEPENDS std_msgs roscpp image_transport image_transport nodelet std_msgs message_generation geometry_msgs
 )
 
@@ -50,6 +50,12 @@ if(catkin_EXPORTED_LIBRARIES)
 endif()
 
 install(TARGETS stag_ros
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(TARGETS stag_lib
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
