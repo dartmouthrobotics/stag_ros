@@ -14,6 +14,7 @@
 #include <tf/transform_listener.h>
 #include <stag_ros/StagMarker.h>
 #include <stag_ros/StagMarkers.h>
+#include <stag_ros/SetTrackedBundles.h>
 #include <image_transport/image_transport.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <pluginlib/class_list_macros.h>
@@ -94,6 +95,8 @@ public:
 
     std::map<size_t, std::vector<cv::Point2d>> previous_image_points;
 
+    ros::ServiceServer set_tracked_bundle_ids_service;
+
     StagNodelet() : 
         transform_broadcaster(NULL), 
         transform_listener(NULL),
@@ -101,6 +104,8 @@ public:
         frame_number(0),
         highest_frame(0)
         {};
+
+    std::vector<size_t> trackable_bundle_ids;
 
     double get_marker_size(size_t marker_id);
 
@@ -145,6 +150,11 @@ public:
     void onInit();
 
     void update_bundle_tracking_information(MarkerBundle& bundle, const std::vector<stag::Marker>& detected_markers, cv::Point2f marker_corner_offset, int image_cols, int image_rows);
+
+    bool set_tracked_bundle_ids_callback(stag_ros::SetTrackedBundles::Request& request, stag_ros::SetTrackedBundles::Response& response);
+
+    bool bundle_is_trackable(const MarkerBundle& bundle);
+
 }; // class stag_ros
 
 } // namespace stag_ros

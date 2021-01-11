@@ -10,12 +10,18 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   cv_bridge
   nodelet
+  message_generation
 )
 
 add_message_files(
   FILES
   StagMarkers.msg
   StagMarker.msg
+)
+
+add_service_files(
+  FILES
+  SetTrackedBundles.srv
 )
 
 generate_messages(

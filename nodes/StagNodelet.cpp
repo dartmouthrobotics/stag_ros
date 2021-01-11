@@ -19,6 +19,32 @@ double StagNodelet::get_marker_size(size_t marker_id) {
 }
 
 
+bool StagNodelet::set_tracked_bundle_ids_callback(stag_ros::SetTrackedBundles::Request& request, stag_ros::SetTrackedBundles::Response& response) {
+    trackable_bundle_ids.clear();
+    trackable_bundle_ids.insert(
+        trackable_bundle_ids.begin(),
+        request.tracked_bundle_ids.begin(),
+        request.tracked_bundle_ids.end()
+    );
+
+    for (auto& trackable_bundle_id : trackable_bundle_ids) {
+        auto bundle_location = std::find_if(
+            marker_bundles.begin(),
+            marker_bundles.end(),
+            [trackable_bundle_id](const MarkerBundle& bundle) {
+                return trackable_bundle_id == bundle.broadcasted_id;
+            }
+        );
+
+        if (bundle_location == marker_bundles.end()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
 float StagNodelet::get_reprojection_error(std::vector<cv::Point3f> object_points, std::vector<cv::Point2d> image_points, cv::Mat rotation_rodrigues, cv::Mat translation, cv::Mat camera_matrix) {
     std::vector<cv::Point2f> reprojected_points;
 
@@ -365,7 +391,7 @@ std::map<size_t, std::vector<cv::Point2d>> StagNodelet::refine_corners(std::vect
 
 
 bool StagNodelet::should_track_bundles() {
-    return track_markers;
+    return track_markers && !trackable_bundle_ids.empty();
 }
 
 int clamp_to_range(int to_clamp, int minimum, int maximum) {
@@ -422,14 +448,12 @@ void StagNodelet::update_bundle_tracking_information(MarkerBundle& bundle, const
     std::vector<cv::Point2f> corners_float;
     cv::Mat(bundle_corners).convertTo(corners_float, cv::Mat(corners_float).type());
 
-
     cv::Rect bundle_bounding_rect = cv::boundingRect(corners_float);
 
     bundle_bounding_rect.x -= marker_track_width_offset;
     bundle_bounding_rect.y -= marker_track_height_offset;
     bundle_bounding_rect.width += marker_track_width_offset * 2;
     bundle_bounding_rect.height += marker_track_height_offset * 2;
-
 
     bundle_bounding_rect.x = clamp_to_range(bundle_bounding_rect.x + marker_corner_offset.x, 0, image_cols);
     bundle_bounding_rect.y = clamp_to_range(bundle_bounding_rect.y + marker_corner_offset.y, 0, image_rows);
@@ -439,6 +463,26 @@ void StagNodelet::update_bundle_tracking_information(MarkerBundle& bundle, const
     bundle.previous_frame_image_bounding_box = bundle_bounding_rect;
 }
 
+// right now only one bundle can really be tracked effectively
+// so the issue is that unless we see them all, we won't get tracking.
+// we need to alert the nodelet which bundles should be tracked
+//
+// the logic is: if we should track any bundle, follow the tracking loop for specifically that bundle.
+//
+// we can have a service listener that listens for a bundle trakcing id list
+// so that would populate the list in this object then we feed in the list of ids
+// into the normal loop.
+//
+// We'll need a service client to handle that on the main code's side too.
+bool StagNodelet::bundle_is_trackable(const MarkerBundle& bundle) {
+    for (const auto& id : trackable_bundle_ids) {
+        if (id == bundle.broadcasted_id) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag::Stag& stag_instance) {
     // in each frame, if all four markers were visible, cut the frame down. Otherwise
@@ -451,47 +495,50 @@ std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag
         for (auto& bundle : marker_bundles) {
             bool previously_visible = bundle.fully_visible_in_previous_frame;
 
-            if (bundle.fully_visible_in_previous_frame) {
-                cv::Mat bundle_sub_image(
-                    bundle.previous_frame_image_bounding_box.height,
-                    bundle.previous_frame_image_bounding_box.width,
-                    image.type()
-                );
+            if (bundle_is_trackable(bundle)) {
+                if (bundle.fully_visible_in_previous_frame) {
+                    cv::Mat bundle_sub_image(
+                        bundle.previous_frame_image_bounding_box.height,
+                        bundle.previous_frame_image_bounding_box.width,
+                        image.type()
+                    );
 
-                image(bundle.previous_frame_image_bounding_box).copyTo(bundle_sub_image);
+                    image(bundle.previous_frame_image_bounding_box).copyTo(bundle_sub_image);
 
-                cv::Point2f corner_offset;
-                corner_offset.x = bundle.previous_frame_image_bounding_box.x;
-                corner_offset.y = bundle.previous_frame_image_bounding_box.y;
+                    cv::Point2f corner_offset;
+                    corner_offset.x = bundle.previous_frame_image_bounding_box.x;
+                    corner_offset.y = bundle.previous_frame_image_bounding_box.y;
 
-                stag_instance.markers.clear();
-                stag_instance.detectMarkers(bundle_sub_image);
+                    stag_instance.markers.clear();
+                    stag_instance.detectMarkers(bundle_sub_image);
 
-                update_bundle_tracking_information(
-                    bundle,
-                    stag_instance.markers,
-                    corner_offset,
-                    image.cols,
-                    image.rows
-                );
+                    update_bundle_tracking_information(
+                        bundle,
+                        stag_instance.markers,
+                        corner_offset,
+                        image.cols,
+                        image.rows
+                    );
 
-                for (auto& marker : stag_instance.markers) {
-                    for (auto& corner : marker.corners) {
-                        corner.x += corner_offset.x;
-                        corner.y += corner_offset.y;
+                    for (auto& marker : stag_instance.markers) {
+                        for (auto& corner : marker.corners) {
+                            corner.x += corner_offset.x;
+                            corner.y += corner_offset.y;
+                        }
+
+                        markers.push_back(marker);
                     }
+                }
 
-                    markers.push_back(marker);
+                if (!bundle.fully_visible_in_previous_frame) {
+                    tracked_all_bundles = false;
+
+                    if (previously_visible) {
+                        ROS_INFO_STREAM("STag tracking stopped for bundle id " << bundle.broadcasted_id);
+                    }
                 }
             }
 
-            if (!bundle.fully_visible_in_previous_frame) {
-                tracked_all_bundles = false;
-
-                if (previously_visible) {
-                    ROS_INFO_STREAM("STag tracking stopped for bundle id " << bundle.broadcasted_id);
-                }
-            }
         }
 
         if (tracked_all_bundles) {
@@ -507,13 +554,15 @@ std::vector<stag::Marker> StagNodelet::detect_markers(const cv::Mat& image, stag
     image_offset.y = 0.0;
 
     for (auto& bundle : marker_bundles) {
-        update_bundle_tracking_information(
-            bundle,
-            stag_instance.markers,
-            image_offset,
-            image.cols,
-            image.rows
-        );
+        if (bundle_is_trackable(bundle)) {
+            update_bundle_tracking_information(
+                bundle,
+                stag_instance.markers,
+                image_offset,
+                image.cols,
+                image.rows
+            );
+        }
     }
 
     return stag_instance.markers;
@@ -756,7 +805,6 @@ void StagNodelet::onInit() {
         );
     }
 
-
     if (process_images_in_parallel) {
         ROS_INFO_STREAM("Processing images in parallel! The input topic must be an image_raw topic.");
         ros::SubscribeOptions opts;
@@ -772,6 +820,9 @@ void StagNodelet::onInit() {
     }
 
     ROS_INFO_STREAM("Stag ros is ready! Listening for images at " << camera_image_topic);
+
+    //
+    set_tracked_bundle_ids_service = private_node_handle.advertiseService("set_tracked_bundle_ids", &StagNodelet::set_tracked_bundle_ids_callback, this);
 }
 
 } // namespace stag_ros
